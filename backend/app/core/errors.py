@@ -35,6 +35,20 @@ class NotFoundError(AppError):
         super().__init__(f"{resource} '{identifier}' was not found")
 
 
+class ConflictError(AppError):
+    """The request conflicts with the current state of a resource."""
+
+    status_code = 409
+    code = "conflict"
+
+
+class ValidationError(AppError):
+    """The request was well-formed but semantically invalid."""
+
+    status_code = 422
+    code = "validation_error"
+
+
 class DatabaseNotConfiguredError(AppError):
     """Supabase is not configured on the server."""
 
@@ -68,6 +82,62 @@ class AIInvalidOutputError(AppError):
 
     status_code = 502
     code = "ai_invalid_output"
+
+
+class EmailNotConfiguredError(AppError):
+    """The email transport (Gmail SMTP) is not configured on the server."""
+
+    status_code = 503
+    code = "email_not_configured"
+
+
+class EmailUpstreamError(AppError):
+    """The email server rejected the request or was unreachable."""
+
+    status_code = 502
+    code = "email_upstream_error"
+
+
+class WebhookSignatureError(AppError):
+    """The webhook signature could not be verified."""
+
+    status_code = 401
+    code = "webhook_signature_invalid"
+
+
+class WhatsAppNotEnabledError(AppError):
+    """WhatsApp messaging is disabled on this server (WHATSAPP_ENABLED=false)."""
+
+    status_code = 503
+    code = "whatsapp_not_enabled"
+
+
+class WhatsAppNotConfiguredError(AppError):
+    """WhatsApp is enabled but no provider adapter / credentials are configured."""
+
+    status_code = 503
+    code = "whatsapp_not_configured"
+
+
+class WhatsAppUpstreamError(AppError):
+    """The WhatsApp provider rejected the request or was unreachable."""
+
+    status_code = 502
+    code = "whatsapp_upstream_error"
+
+
+class NotAuthenticatedError(AppError):
+    """No valid Supabase session was presented on a protected route."""
+
+    status_code = 401
+    code = "not_authenticated"
+
+
+class AuthProviderError(AppError):
+    """Supabase Auth rejected the request or was unreachable."""
+
+    status_code = 502
+    code = "auth_provider_error"
 
 
 def _payload(detail: str, code: str) -> dict[str, str]:

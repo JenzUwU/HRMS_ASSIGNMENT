@@ -53,6 +53,7 @@ from app.db import repositories as repo
 from app.schemas.ai import AIChannel
 from app.schemas.automation import EngagementSweepResult, SweepCandidateResult
 from app.services import ai as ai_service
+from app.services import recruiter_notify
 
 RULE_ID = "pre_joining_no_interaction"
 RULE_DESCRIPTION = (
@@ -317,6 +318,19 @@ def _process_candidate(
             event_id=event_id,
             message_channel=msg.channel.value,
         )
+
+    # Notify the assigned recruiter about the new follow-up task. Best-effort;
+    # deduped by task_id so a re-run that somehow reaches here sends nothing.
+    recruiter_notify.notify_automation_task(
+        db,
+        c,
+        task_id=task_id,
+        detail=(
+            f"Automation flagged {c['full_name']}: joining in "
+            f"{c.get('joining_in_days')} day(s) with no recent interaction. "
+            "An AI follow-up draft is attached to the task."
+        ),
+    )
 
     return SweepCandidateResult(
         **base,

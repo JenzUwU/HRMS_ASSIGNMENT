@@ -146,6 +146,23 @@ def list_recruiters(db: Client) -> list[Row]:
     return _run(db.table("recruiters").select("*").order("full_name")).data or []
 
 
+def get_recruiter_by_email(db: Client, email: str) -> Row | None:
+    """Match an authenticated HR user to their recruiter profile by email."""
+    res = _run(
+        db.table("recruiters").select("*").eq("email", email.lower().strip()).limit(1)
+    )
+    return res.data[0] if res.data else None
+
+
+def insert_recruiter(db: Client, fields: dict[str, Any]) -> Row:
+    """Provision a recruiter profile for a newly registered HR user. Reuses the
+    existing recruiters table; no schema change."""
+    res = _run(db.table("recruiters").insert(fields))
+    if not res.data:
+        raise UpstreamError("Failed to create the recruiter profile.")
+    return res.data[0]
+
+
 # ---------------------------------------------------------------------------
 # risk
 # ---------------------------------------------------------------------------
@@ -216,12 +233,13 @@ def list_engagement_events(db: Client, candidate_id: UUID, limit: int = 50) -> l
 # ---------------------------------------------------------------------------
 
 def list_conversations_for_candidate(db: Client, candidate_id: UUID) -> list[Row]:
-    return _run(
+    res = _run(
         db.table("conversations")
-        .select("*")
+        .select(_CONV_SELECT)
         .eq("candidate_id", str(candidate_id))
         .order("last_message_at", desc=True)
-    ).data or []
+    )
+    return [_flatten_conversation(r) for r in (res.data or [])]
 
 
 def list_messages_for_candidate(db: Client, candidate_id: UUID) -> list[Row]:
@@ -858,3 +876,201 @@ def get_risk_assessment(db: Client, assessment_id: UUID | str) -> Row | None:
         .limit(1)
     )
     return res.data[0] if res.data else None
+
+
+# ---------------------------------------------------------------------------
+# candidate creation (services/candidate_admin.py)
+# ---------------------------------------------------------------------------
+
+def slug_exists(db: Client, slug: str) -> bool:
+    res = _run(
+        db.table("candidates").select("id", count="exact").eq("slug", slug).limit(1)
+    )
+    return (res.count or 0) > 0
+
+
+def email_in_use(db: Client, email: str) -> bool:
+    res = _run(
+        db.table("candidates")
+        .select("id", count="exact")
+        .eq("email", email.lower())
+        .limit(1)
+    )
+    return (res.count or 0) > 0
+
+
+def insert_candidate(db: Client, fields: dict[str, Any]) -> Row:
+    res = _run(db.table("candidates").insert(fields))
+    if not res.data:
+        raise UpstreamError("Failed to create the candidate.")
+    # Return the denormalized list row so callers can build CandidateDetail.
+    row = get_candidate_list_row(db, res.data[0]["id"])
+    if row is None:
+        raise UpstreamError("Candidate was created but could not be read back.")
+    return row
+
+
+# ---------------------------------------------------------------------------
+# outbound email (services/email.py, api/routes/webhooks.py)
+#
+# Reuses the existing `messages` / `conversations` / `engagement_events` tables
+# unchanged. The Resend provider message id has no dedicated column, so it is
+# stored in the companion engagement_events.metadata (jsonb) alongside the
+# persisted message.
+# ---------------------------------------------------------------------------
+
+def insert_outbound_email(
+    db: Client,
+    *,
+    conversation_id: UUID | str,
+    candidate_id: UUID | str,
+    sender_name: str,
+    sender_recruiter_id: UUID | str | None,
+    subject: str,
+    body: str,
+    is_ai_generated: bool,
+    sent_at: str,
+) -> Row:
+    res = _run(
+        db.table("messages").insert(
+            {
+                "conversation_id": str(conversation_id),
+                "candidate_id": str(candidate_id),
+                "direction": "outbound",
+                "channel": "email",
+                "actor": "recruiter",
+                "sender_name": sender_name,
+                "sender_recruiter_id": (
+                    str(sender_recruiter_id) if sender_recruiter_id else None
+                ),
+                "subject": subject,
+                "body": body,
+                "status": "sent",
+                "is_ai_generated": is_ai_generated,
+                "sent_at": sent_at,
+            }
+        )
+    )
+    if not res.data:
+        raise UpstreamError("The email was sent but could not be stored.")
+    return res.data[0]
+
+
+def find_email_event_by_provider_id(
+    db: Client, provider_message_id: str
+) -> Row | None:
+    """The engagement_events row written when an outbound email was sent,
+    matched on metadata.provider_message_id. Used by the delivery webhook and by
+    inbound reply threading (In-Reply-To / References point at our Message-ID)."""
+    res = _run(
+        db.table("engagement_events")
+        .select("id, candidate_id, metadata")
+        .eq("metadata->>provider_message_id", provider_message_id)
+        .order("occurred_at", desc=True)
+        .limit(1)
+    )
+    return res.data[0] if res.data else None
+
+
+# ---------------------------------------------------------------------------
+# inbound email (services/inbound_email.py)
+#
+# Reuses the same messages / conversations / engagement_events tables. The
+# inbound RFC Message-ID has no dedicated column, so it is stored in the
+# companion engagement_events.metadata for idempotent re-polling.
+# ---------------------------------------------------------------------------
+
+def get_candidate_by_email(db: Client, email: str) -> Row | None:
+    """Resolve a candidate from a raw email address (case-insensitive)."""
+    res = _run(
+        db.table("candidates").select("*").eq("email", email.lower().strip()).limit(1)
+    )
+    return res.data[0] if res.data else None
+
+
+def find_inbound_event_by_message_id(db: Client, inbound_message_id: str) -> Row | None:
+    """The companion event for an already-ingested inbound reply, if any."""
+    res = _run(
+        db.table("engagement_events")
+        .select("id, candidate_id, metadata")
+        .eq("metadata->>inbound_message_id", inbound_message_id)
+        .limit(1)
+    )
+    return res.data[0] if res.data else None
+
+
+def insert_inbound_email(
+    db: Client,
+    *,
+    conversation_id: UUID | str,
+    candidate_id: UUID | str,
+    sender_name: str,
+    subject: str | None,
+    body: str,
+    received_at: str,
+) -> Row:
+    """Persist a candidate email reply. direction=inbound, channel=email,
+    actor=candidate. status uses 'delivered' (the message_status enum has no
+    'received' value and cannot be altered here)."""
+    res = _run(
+        db.table("messages").insert(
+            {
+                "conversation_id": str(conversation_id),
+                "candidate_id": str(candidate_id),
+                "direction": "inbound",
+                "channel": "email",
+                "actor": "candidate",
+                "sender_name": sender_name,
+                "subject": subject,
+                "body": body,
+                "status": "delivered",
+                "sent_at": received_at,
+            }
+        )
+    )
+    if not res.data:
+        raise UpstreamError("The inbound reply could not be stored.")
+    return res.data[0]
+
+
+# ---------------------------------------------------------------------------
+# recruiter notifications (services/recruiter_notify.py)
+#
+# Persisted as engagement_events rows (metadata.notification=True). This is both
+# the in-app bell feed and the dedup record; no new table.
+# ---------------------------------------------------------------------------
+
+def find_notification_event(db: Client, notification_key: str) -> Row | None:
+    """The recruiter-notification event for this key, if one was already sent."""
+    res = _run(
+        db.table("engagement_events")
+        .select("id, candidate_id, metadata")
+        .eq("metadata->>notification_key", notification_key)
+        .limit(1)
+    )
+    return res.data[0] if res.data else None
+
+
+def list_notification_events(db: Client, *, limit: int = 30) -> list[Row]:
+    """Recent recruiter-notification events, newest first, with candidate name.
+
+    No recruiter filter yet (auth is a later phase), so the bell shows every
+    recruiter's notifications.
+    """
+    res = _run(
+        db.table("engagement_events")
+        .select(
+            "id, candidate_id, event_type, title, description, occurred_at, "
+            "metadata, candidate:candidates(full_name, slug, initials)"
+        )
+        .eq("metadata->>notification", "true")
+        .order("occurred_at", desc=True)
+        .limit(limit)
+    )
+    rows = res.data or []
+    for row in rows:
+        cand = row.pop("candidate", None) or {}
+        row["candidate_name"] = cand.get("full_name")
+        row["candidate_slug"] = cand.get("slug")
+        row["candidate_initials"] = cand.get("initials")
+    return rows

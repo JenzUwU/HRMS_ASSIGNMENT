@@ -29,6 +29,7 @@ export const GLASS_ICON_NAMES = [
   "tasks",
   "security",
   "messages",
+  "phone_number",
   "upload",
   "download",
   "logout",

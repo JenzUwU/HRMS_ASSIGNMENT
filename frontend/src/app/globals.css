@@ -54,6 +54,29 @@ h6 {
   font-family: var(--font-heading);
 }
 
+/*
+  Tailwind v4 preflight no longer sets `cursor: pointer` on buttons, so every
+  interactive control renders the default arrow. Restore the pointer cursor
+  globally for clickable elements (disabled ones keep not-allowed).
+*/
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+[role="tab"]:not([aria-disabled="true"]),
+[role="menuitem"],
+[role="option"],
+a[href],
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]),
+summary,
+select:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 /* ------------------------------------------------------------------ *
  * Interaction system: shared keyframes/utilities. Durations kept in
  * the 150–300ms band for normal interactions; slower ones are opt-in.

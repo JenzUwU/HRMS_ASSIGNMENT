@@ -291,6 +291,40 @@ export function getCandidate(id: string) {
   return apiFetch<CandidateDetail>(`/candidates/${encodeURIComponent(id)}`);
 }
 
+export interface CreateCandidateBody {
+  full_name: string;
+  email: string;
+  phone?: string | null;
+  role: string;
+  department?: string | null;
+  location: string;
+  recruiter_id?: string | null;
+  offer_date?: string | null;
+  joining_date: string;
+  status?: "offer_accepted" | "active" | "joined" | "declined";
+  current_stage?:
+    | "offer_accepted"
+    | "welcome_sent"
+    | "documentation"
+    | "manager_intro"
+    | "pre_joining"
+    | "joined";
+  source?:
+    | "linkedin"
+    | "referral"
+    | "naukri"
+    | "indeed"
+    | "company_site"
+    | "agency"
+    | "other";
+  employment_type?: "full_time" | "part_time" | "contract" | "intern";
+  preferred_channel?: AiChannel;
+}
+
+export function createCandidate(body: CreateCandidateBody) {
+  return apiFetch<CandidateDetail>("/candidates", { method: "POST", body });
+}
+
 export function getEngagement(id: string) {
   return apiFetch<EngagementJourney>(
     `/candidates/${encodeURIComponent(id)}/engagement`,
@@ -362,7 +396,7 @@ export function getConversionTrend() {
 }
 
 // ---------------------------------------------------------------------------
-// mutations (write endpoints) — all go through apiFetch / ApiError
+// mutations (write endpoints) , all go through apiFetch / ApiError
 // ---------------------------------------------------------------------------
 
 function cid(id: string) {
@@ -420,6 +454,34 @@ export function createCandidateMessage(id: string, body: CreateMessageBody) {
   });
 }
 
+export interface SendEmailBody {
+  subject: string;
+  body: string;
+  reply_to?: string | null;
+  ai_recommendation_id?: string | null;
+}
+
+export interface SendEmailResult {
+  sent: boolean;
+  message_id: string;
+  provider: string;
+  channel: string;
+  candidate_id: string;
+  conversation_id: string;
+  stored_message_id: string;
+}
+
+/**
+ * Send a REAL email to the candidate through Gmail SMTP (server-side) and persist it.
+ * The recipient is the candidate record's email , never passed from the client.
+ */
+export function sendCandidateEmail(id: string, body: SendEmailBody) {
+  return apiFetch<SendEmailResult>(
+    `/candidates/${cid(id)}/communications/email`,
+    { method: "POST", body },
+  );
+}
+
 export interface CreateTaskBody {
   title: string;
   detail?: string | null;
@@ -447,7 +509,7 @@ export function updateJourneyStep(
 }
 
 // ---------------------------------------------------------------------------
-// AI (Groq-backed) — generate + history + HR override
+// AI (Groq-backed) , generate + history + HR override
 // ---------------------------------------------------------------------------
 
 export interface AiMeta {
@@ -573,6 +635,55 @@ export function getRiskHistory(id: string) {
   return apiFetch<RiskRecord[]>(`/candidates/${cid(id)}/risk/history`);
 }
 
+export interface RiskInsight {
+  level: "low" | "medium" | "high";
+  score: number;
+  factors: string[];
+  summary: string | null;
+  source: string; // ai | manual | rule
+  is_current: boolean;
+  overridden: boolean;
+  created_at: string | null;
+}
+
+export interface AiInsightItem {
+  id: string;
+  kind: string;
+  status: string; // suggested | accepted | overridden | dismissed
+  is_current: boolean;
+  overridden: boolean;
+  hr_override_text: string | null;
+  model: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface CandidateAiInsights {
+  candidate_id: string;
+  candidate_slug: string;
+  has_any: boolean;
+  generated_at: string | null;
+  risk: RiskInsight | null;
+  interaction_summary: InteractionSummary | null;
+  interaction_summary_overridden: boolean;
+  interaction_summary_override_text: string | null;
+  next_best_action: NextBestAction | null;
+  next_best_action_overridden: boolean;
+  next_best_action_override_text: string | null;
+  candidate_next_action: string | null;
+  candidate_next_action_source: string | null;
+  recent_recommendations: AiInsightItem[];
+}
+
+/**
+ * Aggregate read of every persisted AI output for a candidate (risk,
+ * interaction summary, next best action, override state, history). Read-only:
+ * the backend makes no Groq call here. Use the POST ai/* endpoints to generate.
+ */
+export function getCandidateAiInsights(id: string) {
+  return apiFetch<CandidateAiInsights>(`/candidates/${cid(id)}/ai/insights`);
+}
+
 export interface RiskOverrideResponse {
   result: RiskRecord;
   previous_ai_assessment: RiskRecord | null;
@@ -639,5 +750,26 @@ export function runEngagementSweep(
   return apiFetch<EngagementSweepResult>("/automation/run-engagement-sweep", {
     method: "POST",
     body,
+  });
+}
+
+// recruiter notifications (in-app bell feed)
+export interface RecruiterNotification {
+  id: string;
+  candidate_id: string;
+  candidate_name: string | null;
+  candidate_slug: string | null;
+  candidate_initials: string | null;
+  kind: string;
+  title: string;
+  reason: string | null;
+  recommended_action: string | null;
+  email_sent: boolean;
+  occurred_at: string;
+}
+
+export function getRecruiterNotifications(limit = 30) {
+  return apiFetch<RecruiterNotification[]>("/notifications", {
+    params: { limit },
   });
 }

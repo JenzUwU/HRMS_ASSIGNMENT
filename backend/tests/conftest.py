@@ -12,6 +12,28 @@ import pytest
 
 from app.schemas.ai import AIChannel, PersonalizedMessage
 
+_TEST_RECRUITER_ID = str(uuid.uuid4())
+
+
+@pytest.fixture(autouse=True)
+def _bypass_auth():
+    """Every route test exercises business logic, not the Supabase session.
+    Override the auth dependency with a fixed HR user so protected routes are
+    reachable. `test_auth.py` clears this to test verification itself."""
+    from app.api import deps
+    from app.main import app
+    from app.schemas.auth import AuthUser
+
+    app.dependency_overrides[deps.get_current_user] = lambda: AuthUser(
+        id="test-user",
+        email="hr@epitaxy-hrms.com",
+        full_name="Test HR",
+        role="HR",
+        recruiter_id=_TEST_RECRUITER_ID,
+    )
+    yield
+    app.dependency_overrides.pop(deps.get_current_user, None)
+
 
 class FakeDB:
     """Stand-in for the Supabase Client. The repo functions are monkeypatched,
@@ -99,4 +121,15 @@ def repo_stub(monkeypatch, fake_message):
     monkeypatch.setattr(er.repo, "insert_ai_recommendation", _insert_reco)
     monkeypatch.setattr(er.repo, "insert_engagement_event", _insert_event)
     monkeypatch.setattr(er.ai_service, "draft_message", _draft_message)
+
+    store["recruiter_notifications"] = []
+    monkeypatch.setattr(
+        er.recruiter_notify, "notify_automation_task",
+        lambda db, cand, *, task_id, detail: (
+            store["recruiter_notifications"].append(
+                {"slug": cand.get("slug"), "task_id": task_id}
+            )
+            or "notified: email"
+        ),
+    )
     return store

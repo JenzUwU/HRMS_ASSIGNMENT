@@ -95,14 +95,22 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
   return (
     <>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[720px] table-fixed text-sm">
+          <colgroup>
+            <col className="w-[26%]" />
+            <col className="w-[13%]" />
+            <col className="w-[13%]" />
+            <col className="w-[12%]" />
+            <col />
+            <col className="w-[44px]" />
+          </colgroup>
           <thead>
-            <tr className="text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">
-              <th className="pb-3">Candidate</th>
-              <th className="pb-3">Joining Date</th>
-              <th className="pb-3">Last Interaction</th>
-              <th className="pb-3">Risk Level</th>
-              <th className="pb-3">Recommended Next Action</th>
+            <tr className="text-left align-bottom text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              <th className="pb-3 pr-4">Candidate</th>
+              <th className="whitespace-nowrap pb-3 pr-4">Joining Date</th>
+              <th className="whitespace-nowrap pb-3 pr-4">Last Interaction</th>
+              <th className="whitespace-nowrap pb-3 pr-4">Risk Level</th>
+              <th className="pb-3 pr-4">Recommended Next Action</th>
               <th className="pb-3" />
             </tr>
           </thead>
@@ -117,9 +125,9 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
                       return;
                     router.push(`/candidates/${c.slug}`);
                   }}
-                  className="group/row cursor-pointer border-t border-border transition-colors hover:bg-orange/[0.04]"
+                  className="group/row cursor-pointer border-t border-border align-top transition-colors hover:bg-orange/[0.04]"
                 >
-                  <td className="py-3">
+                  <td className="py-3 pr-4">
                     <Link
                       href={`/candidates/${c.slug}`}
                       onClick={(e) => e.stopPropagation()}
@@ -129,21 +137,21 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
                         initials={c.initials}
                         size="sm"
                         tone="peach"
-                        className="transition duration-200 group-hover/row:-translate-y-px group-hover/row:brightness-105"
+                        className="shrink-0 transition duration-200 group-hover/row:-translate-y-px group-hover/row:brightness-105"
                       />
-                      {c.full_name}
+                      <span className="truncate">{c.full_name}</span>
                     </Link>
                   </td>
-                  <td className="py-3 text-text-secondary">
+                  <td className="whitespace-nowrap py-3 pr-4 text-text-secondary">
                     {formatDate(c.joining_date)}
                   </td>
-                  <td className="py-3 text-text-secondary">
+                  <td className="whitespace-nowrap py-3 pr-4 text-text-secondary">
                     {relativeDays(c.days_since_interaction)}
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 pr-4">
                     <RiskBadge level={riskLabel(c.risk_level)} />
                   </td>
-                  <td className="py-3 text-text-secondary">
+                  <td className="py-3 pr-4 text-text-secondary">
                     {c.next_action ?? ""}
                     {noteCount > 0 && (
                       <span className="ml-2 rounded-full bg-orange/10 px-1.5 py-0.5 text-[10px] font-semibold text-orange">

@@ -255,7 +255,7 @@ export function JourneyView({
                     }}
                     className="flex items-center gap-1 rounded-md px-1 py-0.5 transition-colors hover:bg-peach/40 hover:text-orange"
                   >
-                    <GlassIcon name="messages" size={16} />
+                    <GlassIcon name="phone_number" size={18} />
                     {candidate.phone}
                   </button>
                 )}

@@ -9,6 +9,7 @@ import {
 import { Avatar } from "@/components/ui/Avatar";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/cn";
+import { useAuth } from "@/lib/auth";
 
 const ITEMS: { label: string; href?: string; note?: string }[] = [
   { label: "Profile", note: "Profile view is a prototype stub." },
@@ -17,10 +18,23 @@ const ITEMS: { label: string; href?: string; note?: string }[] = [
   { label: "Notification Settings", href: "/notifications" },
 ];
 
+function initialsOf(name: string | null, email: string | null): string {
+  const src = (name || email || "").trim();
+  if (!src) return "HR";
+  const parts = src.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return src.slice(0, 2).toUpperCase();
+}
+
 export function UserMenu() {
   const router = useRouter();
+  const { fullName, email, role, signOut } = useAuth();
   const [open, setOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  const displayName = fullName || email || "HR User";
+  const initials = initialsOf(fullName, email);
 
   useEffect(() => {
     if (!open) return;
@@ -52,12 +66,14 @@ export function UserMenu() {
           open && "bg-peach/50",
         )}
       >
-        <Avatar initials="AU" size="md" />
+        <Avatar initials={initials} size="md" />
         <span className="hidden text-left leading-tight sm:block">
-          <span className="block text-sm font-semibold text-charcoal">
-            Admin User
+          <span className="block max-w-[160px] truncate text-sm font-semibold text-charcoal">
+            {displayName}
           </span>
-          <span className="block text-xs text-text-secondary">HR</span>
+          <span className="block text-xs text-text-secondary">
+            {role ?? "HR"}
+          </span>
         </span>
         <ChevronDownIcon
           className={cn(
@@ -78,8 +94,13 @@ export function UserMenu() {
           )}
         >
           <div className="px-2.5 py-2">
-            <p className="text-sm font-semibold text-charcoal">Admin User</p>
-            <p className="text-xs text-text-secondary">HR &middot; admin@hrms.com</p>
+            <p className="truncate text-sm font-semibold text-charcoal">
+              {displayName}
+            </p>
+            <p className="truncate text-xs text-text-secondary">
+              {role ?? "HR"}
+              {email ? ` · ${email}` : ""}
+            </p>
           </div>
           <div className="my-1 h-px bg-black/[0.06]" />
           {ITEMS.map((it) => (
@@ -101,15 +122,20 @@ export function UserMenu() {
           <button
             type="button"
             role="menuitem"
-            onClick={() => {
+            disabled={signingOut}
+            onClick={async () => {
+              if (signingOut) return;
+              setSigningOut(true);
               setOpen(false);
+              await signOut();
               toast("Signed out", "success");
-              router.push("/login");
+              router.replace("/login");
+              router.refresh();
             }}
-            className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-coral transition-colors hover:bg-coral/10"
+            className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-coral transition-colors hover:bg-coral/10 disabled:opacity-60"
           >
             <ArrowRightStartOnRectangleIcon className="h-4 w-4" />
-            Sign Out
+            {signingOut ? "Signing out…" : "Sign Out"}
           </button>
         </div>
       )}

@@ -130,6 +130,10 @@ def test_sweep_processes_eligible_and_persists(fake_db, repo_stub):
     r = res.results[0]
     assert r.outcome == "processed"
     assert r.task_id and r.recommendation_id and r.event_id
+    # the assigned recruiter is notified about the new follow-up task
+    assert len(repo_stub["recruiter_notifications"]) == 1
+    assert repo_stub["recruiter_notifications"][0]["slug"] == "cand-a"
+    assert repo_stub["recruiter_notifications"][0]["task_id"] == str(r.task_id)
 
 
 @pytest.mark.parametrize(

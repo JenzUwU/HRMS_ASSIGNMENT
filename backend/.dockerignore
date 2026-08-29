@@ -5,7 +5,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 tests/
-.env
-.env.*
+.git/
+.env*
 !.env.example
 *.md
+Dockerfile
+.dockerignore

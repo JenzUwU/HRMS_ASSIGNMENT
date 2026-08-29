@@ -49,10 +49,10 @@ export function Field({
       </label>
       <div
         className={cn(
-          "mt-2 flex items-center gap-3 rounded-2xl border bg-white/35 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-md transition-colors focus-within:bg-white/70",
+          "mt-2 flex items-center gap-3 rounded-2xl border bg-white/90 px-3 py-2.5 shadow-[0_1px_2px_rgba(41,41,41,0.06),inset_0_1px_0_rgba(255,255,255,0.7)] backdrop-blur-md transition-colors focus-within:bg-white",
           error
-            ? "border-coral/60 focus-within:border-coral"
-            : "border-white/50 focus-within:border-orange/60",
+            ? "border-coral/70 focus-within:border-coral"
+            : "border-charcoal/15 focus-within:border-orange/70",
         )}
       >
         <span className="flex h-11 w-11 shrink-0 items-center justify-center">

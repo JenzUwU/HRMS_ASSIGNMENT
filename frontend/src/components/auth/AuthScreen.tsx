@@ -348,8 +348,8 @@ export function AuthScreen({
         {children}
 
         <p className="mt-6 text-center text-[11px] text-text-secondary">
-          Prototype: mock authentication, no real credentials are stored
-          securely.
+          Secured by Supabase Auth. Your session is encrypted and never leaves
+          your device unprotected.
         </p>
       </div>
     </div>

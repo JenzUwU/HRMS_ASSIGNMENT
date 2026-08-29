@@ -9,7 +9,8 @@ import {
   FormSuccess,
   SubmitButton,
 } from "@/components/auth/AuthForm";
-import { EMAIL_RE, requestPasswordReset } from "@/lib/mock-auth";
+import { EMAIL_RE } from "@/lib/auth-validation";
+import { supabaseBrowser } from "@/lib/supabase/client";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -26,7 +27,15 @@ export default function ForgotPasswordPage() {
       return;
     }
     setLoading(true);
-    await requestPasswordReset(email);
+    // Fire and forget: the UI never reveals whether the email is registered.
+    await supabaseBrowser()
+      .auth.resetPasswordForEmail(email.trim(), {
+        redirectTo:
+          typeof window !== "undefined"
+            ? `${window.location.origin}/login`
+            : undefined,
+      })
+      .catch(() => {});
     setLoading(false);
     setSent(true);
   }

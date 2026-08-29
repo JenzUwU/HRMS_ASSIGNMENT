@@ -19,8 +19,10 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import logger
 from app.db import repositories as repo
+from app.services import recruiter_notify
 from app.schemas.ai import (
     AIMeta,
+    CandidateAiInsights,
     DraftMessageRequest,
     DraftMessageResponse,
     InteractionSummaryResponse,
@@ -29,6 +31,7 @@ from app.schemas.ai import (
 )
 from app.schemas.mutations import AIRecommendationRecord
 from app.services import ai as ai_service
+from app.services import ai_insights
 
 router = APIRouter(prefix="/candidates/{candidate_id}/ai", tags=["ai"])
 
@@ -51,6 +54,14 @@ def _persist_recommendation(
         # result. Surface it as not-persisted and keep going.
         logger.warning("Could not persist %s recommendation: %s", kind, exc.code)
         return False, None
+
+
+@router.get("/insights", response_model=CandidateAiInsights)
+def get_ai_insights(candidate: CandidateRow, db: DB) -> CandidateAiInsights:
+    """Aggregate the persisted AI outputs (risk, interaction summary, next
+    action, override state, history) for the AI Insights UI. Read-only: no Groq
+    call and nothing is written."""
+    return ai_insights.build_insights(db, candidate)
 
 
 @router.get("/recommendations", response_model=list[AIRecommendationRecord])
@@ -134,6 +145,11 @@ def ai_risk(candidate: CandidateRow, db: DB) -> RiskClassificationResponse:
             source="ai",
         )
         persisted, record_id = True, row["id"]
+        if result.level.value == "high":
+            # Notify the assigned recruiter. Best-effort; deduped by assessment id.
+            recruiter_notify.notify_high_risk(
+                db, candidate, assessment_id=row["id"], summary=result.summary
+            )
     except AppError as exc:
         logger.warning("Could not persist risk assessment: %s", exc.code)
 

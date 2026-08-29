@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   BookmarkIcon,
@@ -13,21 +13,25 @@ import {
   PlusIcon,
 } from "@heroicons/react/24/solid";
 import { AppShell } from "@/components/layout/AppShell";
+import { AiInsightsCard } from "@/components/candidates/AiInsightsCard";
 import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
 import { Card } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/cn";
+import { cleanInboundEmailBody } from "@/lib/clean-inbound-email";
 import { ApiError } from "@/lib/api-client";
-import { mutationErrorMessage } from "@/lib/ai-error";
 import {
+  aiDraftMessage,
   createCandidateMessage,
   createCandidateTask,
   getCandidate,
+  getCandidateCommunications,
   getConversationThread,
   getConversations,
   getMessageTemplates,
+  sendCandidateEmail,
   updateCandidate,
   type AiChannel,
   type CandidateDetail,
@@ -36,6 +40,8 @@ import {
   type Message,
   type MessageTemplate,
 } from "@/lib/api";
+import { aiErrorMessage, mutationErrorMessage } from "@/lib/ai-error";
+import { takeAiDraft } from "@/lib/ai-compose";
 import {
   CHANNEL_LABEL,
   STAGE_LABEL,
@@ -47,6 +53,42 @@ import {
 
 const TABS = ["Inbox", "Sent", "Scheduled", "Templates"] as const;
 type Tab = (typeof TABS)[number];
+
+// Sentinel id for "this candidate has no email conversation yet". The composer
+// still works: the backend opens the conversation on the first send.
+const NEW_EMAIL_CONV = "__new_email_conversation__";
+
+/** Build a placeholder email conversation for a candidate with no thread yet. */
+function synthEmailConversation(c: CandidateDetail): Conversation {
+  const now = new Date().toISOString();
+  return {
+    id: NEW_EMAIL_CONV,
+    candidate_id: c.id,
+    candidate_name: c.full_name,
+    candidate_initials: c.initials,
+    candidate_slug: c.slug,
+    candidate_role: c.role,
+    candidate_location_city: c.location_city,
+    candidate_status: c.status,
+    candidate_current_stage: c.current_stage,
+    channel: "email",
+    subject: "",
+    last_message_at: null,
+    last_message_preview: null,
+    unread_count: 0,
+    is_online: false,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+/** Insert or replace a conversation by id; drop any stale placeholder. */
+function upsertConversation(list: Conversation[], conv: Conversation): Conversation[] {
+  const rest = list.filter(
+    (c) => c.id !== conv.id && c.id !== NEW_EMAIL_CONV,
+  );
+  return [conv, ...rest];
+}
 
 function isHrMessage(m: Message) {
   return m.direction === "outbound" || m.actor !== "candidate";
@@ -72,7 +114,10 @@ export default function CommunicationPage() {
     "message",
   );
   const [draft, setDraft] = useState("");
+  const [subject, setSubject] = useState("");
   const [sending, setSending] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [aiRecId, setAiRecId] = useState<string | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [copiedTemplate, setCopiedTemplate] = useState<string | null>(null);
   const [preferredChannel, setPreferredChannel] = useState<string | null>(null);
@@ -119,31 +164,78 @@ export default function CommunicationPage() {
       .catch(() => setTemplates([]));
   }, []);
 
-  // Deep link support: /communication?candidate=<slug> preselects that
-  // candidate's conversation once the list has loaded (dashboard row action).
-  const [wantCandidate, setWantCandidate] = useState<string | null>(null);
+  // Deep link support: /communication?candidate=<slug> opens THAT candidate's
+  // email conversation, resolved from candidate-scoped endpoints so it works no
+  // matter where the candidate sits in the paginated conversation list (or if
+  // they have no conversation yet). ?compose=ai also loads the stashed AI draft.
+  // The slug from ?compose=ai - the ONLY candidate whose stashed AI draft this
+  // page will load. Never nulled by the list flow, so a race cannot orphan it.
+  const aiComposeSlug = useRef<string | null>(null);
+  const deepLinkSlug = useRef<string | null>(null);
+  const [deepLinkPending, setDeepLinkPending] = useState<string | null>(null);
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const slug = params.get("candidate");
+    aiComposeSlug.current =
+      params.get("compose") === "ai" ? slug : null;
+    deepLinkSlug.current = slug;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWantCandidate(
-      new URLSearchParams(window.location.search).get("candidate"),
-    );
+    setDeepLinkPending(slug);
   }, []);
-  useEffect(() => {
-    if (!wantCandidate || conversations.length === 0) return;
-    const match = conversations.find(
-      (c) => c.candidate_slug === wantCandidate,
-    );
-    if (match) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setActiveId(match.id);
-      setWantCandidate(null);
-    }
-  }, [wantCandidate, conversations]);
 
   useEffect(() => {
-    if (!activeId) return;
+    const slug = deepLinkPending;
+    if (!slug) return;
     let ignore = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // deepLinkPending itself drives the loading UI - no sync setState here.
+    Promise.all([getCandidate(slug), getCandidateCommunications(slug)])
+      .then(([cand, comms]) => {
+        if (ignore) return;
+        const emailThread =
+          comms.conversations.find((c) => c.channel === "email") ?? null;
+        const conv: Conversation = emailThread ?? synthEmailConversation(cand);
+        setCandidate(cand);
+        setConversations((list) => upsertConversation(list, conv));
+        setThread(
+          emailThread ?? { ...synthEmailConversation(cand), messages: [] },
+        );
+        setActiveId(conv.id);
+      })
+      .catch((e) => {
+        if (ignore) return;
+        setListError(
+          e instanceof ApiError && e.status === 404
+            ? "That candidate could not be found."
+            : "Could not load that candidate's conversation.",
+        );
+      })
+      .finally(() => {
+        if (!ignore) setDeepLinkPending(null);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [deepLinkPending]);
+
+  // Load the thread + candidate when a conversation is picked from the list.
+  // Skipped for the deep-link path (handled above) and the "no thread yet"
+  // placeholder (nothing to fetch).
+  useEffect(() => {
+    if (!activeId || activeId === NEW_EMAIL_CONV) return;
+    // The deep-link resolver is mid-flight; it will set the correct thread.
+    if (deepLinkPending) return;
+    if (deepLinkSlug.current) {
+      // The deep-link resolver owns the first selection for this slug; let it
+      // finish, then clear so later list clicks load normally.
+      const owned = conversations.find(
+        (c) => c.id === activeId && c.candidate_slug === deepLinkSlug.current,
+      );
+      if (owned) {
+        deepLinkSlug.current = null;
+        return;
+      }
+    }
+    let ignore = false;
     setThreadLoading(true);
     getConversationThread(activeId)
       .then(async (t) => {
@@ -167,7 +259,28 @@ export default function CommunicationPage() {
     return () => {
       ignore = true;
     };
-  }, [activeId]);
+  }, [activeId, conversations, deepLinkPending]);
+
+  // Composer belongs to one candidate. When the selected candidate changes,
+  // wipe the previous candidate's draft / subject / AI provenance so nothing
+  // leaks across candidates, then load a stashed AI draft for the new one.
+  const composerFor = useRef<string | null>(null);
+  useEffect(() => {
+    const slug = candidate?.slug;
+    if (!slug || slug === composerFor.current) return;
+    composerFor.current = slug;
+    // Load the stashed AI draft only for the candidate it was generated for;
+    // otherwise the composer starts empty for the new candidate.
+    const stashed =
+      aiComposeSlug.current === slug ? takeAiDraft(slug) : null;
+    if (stashed) aiComposeSlug.current = null;
+    setDraft(stashed?.body ?? "");
+    setSubject(stashed?.subject ?? "");
+    setAiRecId(null);
+    setComposerError(null);
+    setComposerMode("message");
+    if (stashed) toast("AI draft loaded, review before sending", "success");
+  }, [candidate?.slug]);
 
   const filteredConversations = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -189,34 +302,131 @@ export default function CommunicationPage() {
     return all.filter((m) => m.status !== "scheduled");
   }, [thread, tab]);
 
+  async function refreshThread() {
+    if (!activeId) return;
+    // Placeholder thread: the real conversation was just created by the send.
+    // Re-resolve it from the candidate so the id and messages become real.
+    if (activeId === NEW_EMAIL_CONV) {
+      if (!candidate) return;
+      try {
+        const comms = await getCandidateCommunications(candidate.slug);
+        const emailThread =
+          comms.conversations.find((c) => c.channel === "email") ?? null;
+        if (emailThread) {
+          setConversations((list) => upsertConversation(list, emailThread));
+          setThread(emailThread);
+          setActiveId(emailThread.id);
+        }
+      } catch {
+        /* keep the placeholder on transient failure */
+      }
+      return;
+    }
+    try {
+      setThread(await getConversationThread(activeId));
+    } catch {
+      /* keep current thread on transient failure */
+    }
+  }
+
+  async function generateDraft() {
+    const conv = conversations.find((c) => c.id === activeId) ?? null;
+    if (!candidate || !conv || drafting) return;
+    setDrafting(true);
+    setComposerError(null);
+    try {
+      const res = await aiDraftMessage(candidate.slug, {
+        channel: (conv.channel as AiChannel) ?? "email",
+      });
+      setDraft(res.result.body);
+      if (res.result.subject) setSubject(res.result.subject);
+      setAiRecId(res.meta.record_id);
+      toast("AI draft ready: review before sending", "success");
+    } catch (e) {
+      setComposerError(aiErrorMessage(e));
+    } finally {
+      setDrafting(false);
+    }
+  }
+
   async function sendDraft() {
     const text = draft.trim();
     const conv = conversations.find((c) => c.id === activeId) ?? null;
     if (!text || !activeId || !conv || sending) return;
+    const channel = conv.channel ?? "email";
+    const isEmail = channel === "email";
+    const asEmail = composerMode === "message" && isEmail;
+
+    // WhatsApp / SMS have no connected provider yet. Never fake a sent message
+    // on those channels - an internal note is still allowed.
+    if (composerMode === "message" && (channel === "whatsapp" || channel === "sms")) {
+      setComposerError(
+        `${channel === "whatsapp" ? "WhatsApp" : "SMS"} is not connected yet. ` +
+          "Use email, or add this as an internal note.",
+      );
+      return;
+    }
+
+    if (asEmail && !subject.trim()) {
+      setComposerError("Add a subject before sending the email.");
+      return;
+    }
+
+    // Recipient safety: send to the resolved candidate. If the loaded candidate
+    // and the selected conversation disagree, refuse rather than risk emailing
+    // the wrong person.
+    if (
+      candidate &&
+      conv.candidate_slug &&
+      candidate.slug !== conv.candidate_slug
+    ) {
+      setComposerError(
+        "Candidate mismatch detected. Reload this page and try again.",
+      );
+      return;
+    }
+    const targetCandidateId = candidate?.id ?? conv.candidate_id;
+
     setSending(true);
     setComposerError(null);
     try {
-      await createCandidateMessage(conv.candidate_id, {
-        channel: (conv.channel as AiChannel) ?? "email",
-        body: text,
-        is_internal_note: composerMode === "note",
-      });
-      // Re-fetch the thread so the persisted message (and any server-side
-      // side effects) are what the UI shows.
-      const fresh = await getConversationThread(activeId);
-      setThread(fresh);
+      if (asEmail) {
+        // REAL email through Gmail SMTP (server-side). The backend resolves the
+        // recipient from this candidate id - never a client-supplied address.
+        await sendCandidateEmail(targetCandidateId, {
+          subject: subject.trim(),
+          body: text,
+          ai_recommendation_id: aiRecId,
+        });
+      } else {
+        await createCandidateMessage(targetCandidateId, {
+          channel: (conv.channel as AiChannel) ?? "email",
+          body: text,
+          is_internal_note: composerMode === "note",
+        });
+      }
+      await refreshThread();
       setDraft("");
+      setSubject("");
+      setAiRecId(null);
       toast(
-        composerMode === "note" ? "Internal note added" : "Message sent",
+        composerMode === "note"
+          ? "Internal note added"
+          : asEmail
+            ? "Email sent"
+            : "Message sent",
         "success",
       );
     } catch (e) {
+      // Keep composer contents; never append a fake message.
       setComposerError(
         mutationErrorMessage(
           e,
           composerMode === "note"
             ? "Could not save the note."
-            : "Could not send the message.",
+            : asEmail
+              ? "Email could not be sent."
+              : "Could not send the message.",
         ),
       );
     } finally {
@@ -406,8 +616,8 @@ export default function CommunicationPage() {
           </div>
         </Card>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-[320px_1fr_300px]">
-          <Card className="flex flex-col p-0">
+        <div className="grid gap-4 xl:h-[calc(100vh-12rem)] xl:min-h-[34rem] xl:grid-cols-[320px_1fr_300px]">
+          <Card className="flex min-h-0 flex-col overflow-hidden p-0">
             <div className="border-b border-border p-4">
               <p className="font-heading text-base font-semibold text-charcoal">
                 Conversations
@@ -423,7 +633,7 @@ export default function CommunicationPage() {
               </div>
             </div>
 
-            <ul className="max-h-[560px] flex-1 overflow-y-auto">
+            <ul className="max-h-[70vh] min-h-0 flex-1 overflow-y-auto xl:max-h-none">
               {listLoading &&
                 Array.from({ length: 6 }).map((_, i) => (
                   <li key={i} className="px-4 py-3">
@@ -497,7 +707,7 @@ export default function CommunicationPage() {
             </div>
           </Card>
 
-          <Card className="flex flex-col p-0">
+          <Card className="flex min-h-0 flex-col overflow-hidden p-0">
             {!active ? (
               <div className="flex flex-1 items-center justify-center p-10 text-sm text-text-secondary">
                 Select a conversation
@@ -523,30 +733,43 @@ export default function CommunicationPage() {
                       </p>
                     </div>
                   </div>
-                  {active.candidate_slug && (
-                    <Link
-                      href={`/candidates/${active.candidate_slug}`}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={refreshThread}
+                      title="Check for new replies"
                       className="rounded-xl border border-border px-3 py-2 text-sm font-semibold text-charcoal transition-all duration-150 hover:-translate-y-px hover:border-orange/40 hover:bg-cream hover:text-orange active:translate-y-0"
                     >
-                      View Candidate
-                    </Link>
-                  )}
+                      Refresh
+                    </button>
+                    {active.candidate_slug && (
+                      <Link
+                        href={`/candidates/${active.candidate_slug}`}
+                        className="rounded-xl border border-border px-3 py-2 text-sm font-semibold text-charcoal transition-all duration-150 hover:-translate-y-px hover:border-orange/40 hover:bg-cream hover:text-orange active:translate-y-0"
+                      >
+                        View Candidate
+                      </Link>
+                    )}
+                  </div>
                 </div>
 
-                <div className="flex-1 space-y-4 overflow-y-auto bg-cream/40 p-5">
-                  {threadLoading && (
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-cream/40 p-5">
+                  {(threadLoading || deepLinkPending) && (
                     <p className="text-center text-sm text-text-secondary">
                       Loading messages...
                     </p>
                   )}
-                  {!threadLoading && threadMessages.length === 0 && (
-                    <p className="text-center text-sm text-text-secondary">
-                      {tab === "Scheduled"
-                        ? "No scheduled messages in this conversation."
-                        : "No messages to show."}
-                    </p>
-                  )}
                   {!threadLoading &&
+                    !deepLinkPending &&
+                    threadMessages.length === 0 && (
+                      <p className="text-center text-sm text-text-secondary">
+                        {tab === "Scheduled"
+                          ? "No scheduled messages in this conversation."
+                          : "No messages to show."}
+                      </p>
+                    )}
+                  {!threadLoading &&
+                    !deepLinkPending &&
                     threadMessages.map((m, i) => {
                       const prev = threadMessages[i - 1];
                       const showDate =
@@ -570,12 +793,30 @@ export default function CommunicationPage() {
                                   : "max-w-[75%] rounded-2xl rounded-tr-sm bg-teal/15 px-4 py-3 text-sm text-charcoal"
                               }
                             >
-                              <p className="mb-1 text-[11px] font-semibold text-text-secondary">
-                                {m.sender_name}
-                                {m.is_ai_generated ? " (AI drafted)" : ""}
-                                {m.is_internal_note ? " (internal note)" : ""}
+                              <p className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-text-secondary">
+                                <span>{m.sender_name}</span>
+                                <Badge
+                                  tone={hr ? "peach" : "teal"}
+                                >
+                                  {m.direction === "inbound"
+                                    ? "Inbound"
+                                    : "Outbound"}
+                                </Badge>
+                                <span className="uppercase">{m.channel}</span>
+                                {m.is_ai_generated ? "· AI drafted" : ""}
+                                {m.is_internal_note ? "· internal note" : ""}
                               </p>
-                              {m.body}
+                              {m.subject && (
+                                <p className="mb-1 text-xs font-semibold text-charcoal">
+                                  {m.subject}
+                                </p>
+                              )}
+                              <p className="whitespace-pre-wrap">
+                                {m.direction === "inbound" &&
+                                m.channel === "email"
+                                  ? cleanInboundEmailBody(m.body)
+                                  : m.body}
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -609,19 +850,45 @@ export default function CommunicationPage() {
                         : "border-border focus-within:border-orange/50",
                     )}
                   >
-                    <input
+                    {composerMode === "message" &&
+                      (active?.channel ?? "email") === "email" && (
+                        <div className="mb-2 flex items-center gap-2">
+                          <input
+                            value={subject}
+                            onChange={(e) => setSubject(e.target.value)}
+                            placeholder="Subject"
+                            className="w-full border-b border-border bg-transparent pb-1 text-sm font-semibold text-charcoal outline-none placeholder:font-normal placeholder:text-text-secondary"
+                          />
+                          <button
+                            type="button"
+                            onClick={generateDraft}
+                            disabled={drafting || !candidate}
+                            className="flex shrink-0 items-center gap-1 rounded-lg border border-orange/40 px-2 py-1 text-xs font-semibold text-orange transition-colors hover:bg-peach/40 disabled:opacity-50"
+                          >
+                            {drafting ? "Drafting…" : "AI draft"}
+                          </button>
+                        </div>
+                      )}
+                    <textarea
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") sendDraft();
+                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey))
+                          sendDraft();
                       }}
+                      rows={composerMode === "message" ? 3 : 2}
                       placeholder={
                         composerMode === "note"
                           ? "Add an internal note (not sent to the candidate)…"
-                          : "Type your message…"
+                          : "Write the email… (⌘/Ctrl+Enter to send)"
                       }
-                      className="w-full bg-transparent text-sm text-charcoal outline-none placeholder:text-text-secondary"
+                      className="w-full resize-none bg-transparent text-sm text-charcoal outline-none placeholder:text-text-secondary"
                     />
+                    {aiRecId && composerMode === "message" && (
+                      <p className="text-[11px] text-text-secondary">
+                        AI draft: review and edit before sending.
+                      </p>
+                    )}
                     {composerError && (
                       <p className="mt-2 text-xs font-medium text-coral">
                         {composerError}
@@ -675,7 +942,13 @@ export default function CommunicationPage() {
                         ) : (
                           <PaperAirplaneIcon className="h-4 w-4" />
                         )}
-                        {composerMode === "note" ? "Add Note" : "Send"}
+                        {sending
+                          ? "Sending…"
+                          : composerMode === "note"
+                            ? "Add Note"
+                            : (active?.channel ?? "email") === "email"
+                              ? "Send Email"
+                              : "Send"}
                       </button>
                     </div>
                   </div>
@@ -684,7 +957,8 @@ export default function CommunicationPage() {
             )}
           </Card>
 
-          <div className="space-y-4">
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto xl:pr-1">
+            {candidate && <AiInsightsCard key={candidate.slug} slug={candidate.slug} />}
             <Card>
               <h3 className="font-heading text-base font-semibold text-charcoal">
                 Engagement Overview

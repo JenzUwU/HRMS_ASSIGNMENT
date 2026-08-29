@@ -11,6 +11,13 @@ supabase==2.31.0
 # AI provider (server-side only, used through app/services/groq_client.py)
 groq==0.15.0
 
+# Email provider (server-side only, used through app/services/email.py)
+resend==2.42.0
+# Resend webhooks are signed with the Svix spec
+svix==1.99.1
+# EmailStr validation for candidate creation
+email-validator==2.3.0
+
 # Dev / test only
 pytest==8.3.4
 pytest-asyncio==0.25.2

@@ -27,6 +27,44 @@ export interface AppNotification {
   timeLabel: string;
 }
 
+import type { RecruiterNotification } from "@/lib/api";
+
+const KIND_MAP: Record<string, NotificationKind> = {
+  high_risk: "attention",
+  inbound_reply: "action",
+  automation_task: "reminder",
+};
+
+/** Relative time label from an ISO timestamp. */
+function relTime(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return days === 1 ? "1d ago" : `${days}d ago`;
+}
+
+/** Map a backend recruiter notification to the bell's display shape. */
+export function toAppNotification(n: RecruiterNotification): AppNotification {
+  const slug = n.candidate_slug;
+  return {
+    id: n.id,
+    title: n.title,
+    reason:
+      n.recommended_action ?? n.reason ?? "Candidate needs recruiter attention",
+    href: slug
+      ? n.kind === "inbound_reply"
+        ? `/communication?candidate=${slug}`
+        : `/candidates/${slug}`
+      : "/notifications",
+    initials: n.candidate_initials ?? "?",
+    kind: KIND_MAP[n.kind] ?? "attention",
+    timeLabel: relTime(n.occurred_at),
+  };
+}
+
 export const MOCK_NOTIFICATIONS: AppNotification[] = [
   {
     id: "aisha-jha-onboarding-resources",

@@ -6,11 +6,13 @@
  * output that HR reviews — never an action taken on the candidate's behalf.
  */
 import { useCallback, useEffect, useState } from "react";
-import { SparklesIcon } from "@heroicons/react/24/solid";
+import { useRouter } from "next/navigation";
+import { PaperAirplaneIcon, SparklesIcon } from "@heroicons/react/24/solid";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { cn } from "@/lib/cn";
 import { toast } from "@/lib/toast";
+import { stashAiDraft } from "@/lib/ai-compose";
 import { aiErrorMessage, mutationErrorMessage } from "@/lib/ai-error";
 import {
   aiDraftMessage,
@@ -56,6 +58,7 @@ interface ToolState<T> {
 const idle = { status: "idle" as const };
 
 export function CandidateAiPanel({ slug }: { slug: string }) {
+  const router = useRouter();
   const [tool, setTool] = useState<Tool>("message");
 
   const [channel, setChannel] = useState<AiChannel>("email");
@@ -202,7 +205,7 @@ export function CandidateAiPanel({ slug }: { slug: string }) {
             {message.status === "done" && message.data && (
               <div className="rounded-xl border border-border bg-cream/50 p-3">
                 <Badge tone="amber" className="mb-2">
-                  Draft — review before sending
+                  Draft: review before sending
                 </Badge>
                 {message.data.result.subject && (
                   <p className="text-sm font-semibold text-charcoal">
@@ -217,7 +220,31 @@ export function CandidateAiPanel({ slug }: { slug: string }) {
                     Why this: {message.data.result.personalization_rationale}
                   </p>
                 )}
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {channel === "email" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const r = message.data!.result;
+                        stashAiDraft({
+                          slug,
+                          subject: r.subject ?? null,
+                          body: r.body,
+                        });
+                        toast(
+                          "Opening the composer, review before sending",
+                          "success",
+                        );
+                        router.push(
+                          `/communication?candidate=${slug}&compose=ai`,
+                        );
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-orange px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-orange/90"
+                    >
+                      <PaperAirplaneIcon className="h-3.5 w-3.5" />
+                      Send email
+                    </button>
+                  )}
                   <MiniButton
                     onClick={() => {
                       const r = message.data!.result;

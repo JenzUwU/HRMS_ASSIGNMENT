@@ -128,3 +128,63 @@ class NextBestActionResponse(BaseModel):
 class RiskClassificationResponse(BaseModel):
     result: RiskClassification
     meta: AIMeta
+
+
+# ---------------------------------------------------------------------------
+# Aggregate read: everything the AI Insights UI needs in one call.
+# Composed from already-persisted ai_recommendations / risk_assessments /
+# candidate fields. No Groq call, no new persistence.
+# ---------------------------------------------------------------------------
+
+class RiskInsight(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    level: RiskLevel
+    score: int
+    factors: list[str] = Field(default_factory=list)
+    summary: str | None = None
+    source: str                       # ai | manual | rule
+    is_current: bool = True
+    overridden: bool = False          # current assessment is a manual HR decision
+    created_at: str | None = None
+
+
+class AiInsightItem(BaseModel):
+    """One persisted AI recommendation, trimmed for the history list."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: UUID
+    kind: str
+    status: str                       # suggested | accepted | overridden | dismissed
+    is_current: bool
+    overridden: bool = False
+    hr_override_text: str | None = None
+    model: str | None = None
+    created_at: str
+    resolved_at: str | None = None
+
+
+class CandidateAiInsights(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    candidate_id: UUID
+    candidate_slug: str
+    has_any: bool                     # false -> UI shows the empty state
+    generated_at: str | None = None   # newest underlying record timestamp
+
+    risk: RiskInsight | None = None
+
+    interaction_summary: InteractionSummary | None = None
+    interaction_summary_overridden: bool = False
+    interaction_summary_override_text: str | None = None
+
+    next_best_action: NextBestAction | None = None
+    next_best_action_overridden: bool = False
+    next_best_action_override_text: str | None = None
+
+    # Always-present grounded signal from the candidate record.
+    candidate_next_action: str | None = None
+    candidate_next_action_source: str | None = None   # ai | manual | rule
+
+    recent_recommendations: list[AiInsightItem] = Field(default_factory=list)

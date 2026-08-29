@@ -12,17 +12,19 @@ import {
   FormSuccess,
   SubmitButton,
 } from "@/components/auth/AuthForm";
-import { authenticate, EMAIL_RE, MIN_PASSWORD } from "@/lib/mock-auth";
+import { EMAIL_RE, MIN_PASSWORD } from "@/lib/auth-validation";
+import { supabaseBrowser } from "@/lib/supabase/client";
 import { cn } from "@/lib/cn";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const justRegistered = params.get("registered") === "1";
+  const nextPath = params.get("next") || "/dashboard";
 
   const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState("admin@hrms.com");
-  const [password, setPassword] = useState("HrmsDemo#2026");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{
@@ -48,21 +50,30 @@ function LoginForm() {
     if (loading || !validate()) return;
 
     setLoading(true);
-    const res = await authenticate(email, password);
-    if (res.ok) {
-      router.push("/dashboard");
+    const { error } = await supabaseBrowser().auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    if (error) {
+      setFormError(
+        /invalid login credentials/i.test(error.message)
+          ? "Invalid email or password. Please try again."
+          : error.message,
+      );
+      setLoading(false);
       return;
     }
-    setFormError(res.error);
-    setLoading(false);
+    // Full navigation so the middleware re-runs with the new session cookie.
+    router.replace(nextPath.startsWith("/") ? nextPath : "/dashboard");
+    router.refresh();
   }
 
   const fieldWrap = (invalid?: string) =>
     cn(
-      "mt-2 flex items-center gap-3 rounded-2xl border bg-white/35 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-md transition-colors focus-within:bg-white/70",
+      "mt-2 flex items-center gap-3 rounded-2xl border bg-white/90 px-3 py-2.5 shadow-[0_1px_2px_rgba(41,41,41,0.06),inset_0_1px_0_rgba(255,255,255,0.7)] backdrop-blur-md transition-colors focus-within:bg-white",
       invalid
-        ? "border-coral/60 focus-within:border-coral"
-        : "border-white/50 focus-within:border-orange/60",
+        ? "border-coral/70 focus-within:border-coral"
+        : "border-charcoal/15 focus-within:border-orange/70",
     );
 
   return (

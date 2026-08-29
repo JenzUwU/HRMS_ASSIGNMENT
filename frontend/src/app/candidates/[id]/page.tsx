@@ -4,10 +4,8 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ChevronRightIcon,
-  EllipsisVerticalIcon,
   InformationCircleIcon,
   MapPinIcon,
-  PhoneIcon,
 } from "@heroicons/react/24/solid";
 import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
 import { AppShell } from "@/components/layout/AppShell";
@@ -19,6 +17,7 @@ import { JourneyStepper } from "@/components/charts/JourneyStepper";
 import { CandidateAiPanel } from "@/components/candidates/CandidateAiPanel";
 import { HrNotesCard } from "@/components/candidates/HrNotesCard";
 import { RiskOverrideControl } from "@/components/candidates/RiskOverrideControl";
+import { CandidateMoreActions } from "@/components/candidates/CandidateMoreActions";
 import { ApiError } from "@/lib/api-client";
 import {
   getCandidate,
@@ -177,7 +176,7 @@ export default async function CandidateDetailsPage({
                   </span>
                   {candidate.phone && (
                     <span className="flex items-center gap-1.5">
-                      <PhoneIcon className="h-4 w-4" />
+                      <GlassIcon name="phone_number" size={20} />
                       {candidate.phone}
                     </span>
                   )}
@@ -200,7 +199,7 @@ export default async function CandidateDetailsPage({
                   </span>
                 </div>
               </div>
-              <div className="flex flex-col gap-2">
+              <div className="flex w-44 flex-col gap-2">
                 <Link
                   href={`/communication?candidate=${candidate.slug}`}
                   className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-orange px-4 py-2.5 text-sm font-semibold text-orange transition-colors hover:bg-peach/40"
@@ -208,10 +207,11 @@ export default async function CandidateDetailsPage({
                   <GlassIcon name="email" size={20} />
                   Send Message
                 </Link>
-                <button className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-charcoal transition-colors hover:bg-cream">
-                  <EllipsisVerticalIcon className="h-4 w-4" />
-                  More Actions
-                </button>
+                <CandidateMoreActions
+                  slug={candidate.slug}
+                  email={candidate.email}
+                  phone={candidate.phone}
+                />
               </div>
             </div>
           </Card>

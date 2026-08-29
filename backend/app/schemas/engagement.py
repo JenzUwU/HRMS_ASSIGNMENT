@@ -19,7 +19,9 @@ class _Model(BaseModel):
 
 
 class JourneyStep(_Model):
-    id: UUID
+    # None when the candidate has no candidate_journey_steps row yet for this
+    # stage - the read model synthesizes the 6 ordered stages regardless.
+    id: UUID | None = None
     stage: str
     label: str
     status: str            # pending | in_progress | completed | skipped

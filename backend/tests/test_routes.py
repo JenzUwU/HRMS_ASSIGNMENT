@@ -31,7 +31,7 @@ def client(monkeypatch):
         lambda db, ref: CAND if ref in (CAND["slug"], CAND["id"]) else None,
     )
     yield TestClient(app)
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(deps.get_db, None)
 
 
 # --- candidate resolution --------------------------------------------

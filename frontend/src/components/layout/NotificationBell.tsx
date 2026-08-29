@@ -6,7 +6,12 @@ import { ArrowRightIcon } from "@heroicons/react/24/solid";
 import { cn } from "@/lib/cn";
 import { GlassIcon } from "@/components/ui/GlassIcon";
 import { Avatar } from "@/components/ui/Avatar";
-import { MOCK_NOTIFICATIONS, type AppNotification } from "@/lib/notifications";
+import {
+  MOCK_NOTIFICATIONS,
+  toAppNotification,
+  type AppNotification,
+} from "@/lib/notifications";
+import { getRecruiterNotifications } from "@/lib/api";
 
 /**
  * Interactive notification bell + glassmorphism dropdown.
@@ -16,13 +21,34 @@ import { MOCK_NOTIFICATIONS, type AppNotification } from "@/lib/notifications";
  * badge markup are unchanged from the original Topbar.
  */
 export function NotificationBell({
-  notifications = MOCK_NOTIFICATIONS,
+  notifications: override,
 }: {
   notifications?: AppNotification[];
 }) {
   const [open, setOpen] = useState(false);
   const [readIds, setReadIds] = useState<string[]>([]);
+  const [feed, setFeed] = useState<AppNotification[] | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Real recruiter-notification feed from the backend; falls back to the mock
+  // list if the API is unavailable or has no notifications yet.
+  useEffect(() => {
+    if (override) return;
+    let active = true;
+    getRecruiterNotifications(20)
+      .then((rows) => {
+        if (active) setFeed(rows.map(toAppNotification));
+      })
+      .catch(() => {
+        if (active) setFeed(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [override]);
+
+  const notifications =
+    override ?? (feed && feed.length > 0 ? feed : MOCK_NOTIFICATIONS);
 
   const unreadCount = notifications.filter(
     (n) => !readIds.includes(n.id),

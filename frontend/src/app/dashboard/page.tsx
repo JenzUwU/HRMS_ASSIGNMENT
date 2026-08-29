@@ -6,6 +6,7 @@ import { StatCard } from "@/components/ui/StatCard";
 import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
 import { Avatar } from "@/components/ui/Avatar";
 import { AttentionTable } from "@/components/dashboard/AttentionTable";
+import { DashboardAiInsights } from "@/components/dashboard/DashboardAiInsights";
 import { EngagementFunnel } from "@/components/charts/EngagementFunnel";
 import { ApiError } from "@/lib/api-client";
 import {
@@ -217,25 +218,29 @@ export default async function DashboardPage() {
           <AttentionTable items={highRisk.items} />
         </SectionCard>
 
-        <Card>
-          <h3 className="font-heading text-base font-semibold text-charcoal">
-            Quick Access
-          </h3>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            {quickAccess.map((q) => (
-              <Link
-                key={q.href}
-                href={q.href}
-                className="flex flex-col items-center gap-2 rounded-xl border border-border bg-cream/60 px-3 py-5 text-center hover:border-orange/40 hover:bg-peach/40"
-              >
-                <GlassIcon name={q.icon} size={40} />
-                <span className="text-xs font-semibold text-charcoal">
-                  {q.label}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </Card>
+        <div className="flex flex-col gap-4">
+          <DashboardAiInsights candidates={highRisk.items} />
+
+          <Card>
+            <h3 className="font-heading text-base font-semibold text-charcoal">
+              Quick Access
+            </h3>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              {quickAccess.map((q) => (
+                <Link
+                  key={q.href}
+                  href={q.href}
+                  className="flex flex-col items-center gap-2 rounded-xl border border-border bg-cream/60 px-3 py-5 text-center hover:border-orange/40 hover:bg-peach/40"
+                >
+                  <GlassIcon name={q.icon} size={40} />
+                  <span className="text-xs font-semibold text-charcoal">
+                    {q.label}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </Card>
+        </div>
       </div>
     </AppShell>
   );

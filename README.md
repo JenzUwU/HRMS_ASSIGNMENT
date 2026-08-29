@@ -56,7 +56,7 @@ backend/
       deps.py               get_db, get_candidate_or_404 (UUID or slug)
       router.py             include_router for every route module
       routes/               health, candidates, communications, analytics,
-                            reference, ai, overrides, automation
+                            reference, ai, overrides, automation, webhooks
     core/                   config (typed settings), errors, logging, constants
     db/
       supabase.py           the ONLY Supabase SDK import
@@ -70,6 +70,9 @@ backend/
       groq_client.py        the ONLY Groq SDK import; JSON-mode call + retry
       ai.py                 pipeline: context → prompt → Groq → validate → business rules
       mutations.py          write-side business logic (notes, status, journey, messages, overrides)
+      candidate_admin.py    candidate creation (slug/initials/recruiter defaults)
+      resend_client.py      the ONLY Resend SDK import; send_email + webhook verify
+      email.py              outbound email business logic (validate → send → persist)
       engagement_rules.py   the automated engagement rule + sweep
       scheduler.py          in-process asyncio loop that only calls the sweep
   tests/                    pytest (offline; Groq + Supabase faked)
@@ -141,15 +144,18 @@ Base path `/api/v1`. `{candidate_id}` accepts a UUID **or** the `candidates.slug
 
 | Method | Path | Purpose |
 |---|---|---|
+| POST | `/candidates` | create a candidate (HR "Add Candidate") |
 | POST | `/candidates/{id}/notes` | create HR note |
 | PATCH | `/candidates/{id}` | status and/or preferred channel |
 | POST | `/candidates/{id}/tasks` | create a follow-up task (quick actions) |
-| POST | `/candidates/{id}/messages` | send message / add internal note |
+| POST | `/candidates/{id}/messages` | internal note / non-email message |
+| POST | `/candidates/{id}/communications/email` | **send a real email to the candidate via Resend** + persist |
 | PATCH | `/candidates/{id}/journey/{stage}` | set a journey step's status |
 | POST | `/candidates/{id}/ai/message` · `/summary` · `/next-action` · `/risk` | generate + persist |
 | PATCH | `/ai-recommendations/{id}` | HR `accept` / `dismiss` / `override` |
 | PATCH | `/risk-assessments/{id}` | HR manual risk override |
 | POST | `/automation/run-engagement-sweep` | run the sweep now (manual/API trigger) |
+| POST | `/webhooks/resend` | Resend **delivery-status** webhook (Svix-signed, public; 401 if secret unset) |
 
 ## 6. Frontend architecture
 
@@ -377,6 +383,11 @@ npm run dev                       # http://localhost:3000
 | `GROQ_API_KEY` | server-side only; without it AI endpoints return 503 |
 | `GROQ_MODEL` | default `openai/gpt-oss-20b` |
 | `GROQ_TIMEOUT_SECONDS`, `GROQ_MAX_RETRIES` | defaults 30 / 1 |
+| `RESEND_API_KEY` | server-side only; without it the email endpoint returns 503 |
+| `RESEND_FROM_EMAIL` | sender address on a domain **verified in your Resend account** |
+| `RESEND_FROM_NAME` | default `HR` |
+| `RESEND_WEBHOOK_SECRET` | Svix signing secret (`whsec_…`); unset ⇒ `/webhooks/resend` rejects every call (401) |
+| `RESEND_TIMEOUT_SECONDS` | Resend HTTP timeout, default 30 |
 | `BACKEND_CORS_ORIGINS` | comma-separated, default `http://localhost:3000` |
 | `AUTOMATION_ENABLED` | default `false` (in-process scheduler) |
 | `AUTOMATION_INTERVAL_MINUTES` / `_JOINING_WINDOW_DAYS` / `_NO_INTERACTION_DAYS` / `_DEDUP_DAYS` / `_MAX_CANDIDATES_PER_RUN` | 360 / 7 / 5 / 3 / 25 |
@@ -411,8 +422,8 @@ docker compose up
 
 ## 20. Testing
 
-Backend: `cd backend && python -m pytest` — **50 tests, offline** (Groq and
-Supabase are faked; no network).
+Backend: `cd backend && python -m pytest` — **63 tests, offline** (Groq, Supabase
+and Resend are all faked; no email is sent, no network call is made).
 
 - `test_engagement_rules.py` (18) — the 8 required rule cases + eligibility
   edges, dedup double-run, per-candidate failure isolation, dry-run.
@@ -427,6 +438,15 @@ Supabase are faked; no network).
 - `test_routes.py` (11) — via `TestClient`: unknown-candidate 404, invalid body
   422, extra field 422, bad status enum 422, note created 201, AI 404 /
   `ai_not_configured` 503 / `ai_upstream_error` 502, recommendations list.
+- `test_email.py` (13) — **missing Resend key → 503**; candidate with no /
+  invalid email rejected; route `404` unknown candidate; route `422` invalid
+  body / extra field; **Resend success → message persisted** (recipient taken
+  from the candidate record, provider id on the companion event, interaction
+  updated); **Resend failure → 502, nothing persisted**; request-model
+  validation (bad `reply_to`, subject bounds, strip); **AI-draft id flows into
+  the send** (`is_ai_generated`, recommendation marked accepted); candidate
+  creation (slug/initials/recruiter default, bad email); new-candidate journey
+  with no step rows.
 
 Frontend: `npm run lint` and `npx tsc --noEmit` are clean; `npm run build`
 succeeds. There is no component test runner in the project; API error mapping and
@@ -467,6 +487,24 @@ mutation flows are covered by the backend route tests and by manual verification
 - **`docker compose build` / `up` were not run in the authoring environment**
   (no Docker CLI available there). The Dockerfiles/compose follow standard
   patterns and the standalone build + healthcheck paths were verified manually.
+- **Real email — sending domain must be verified in Resend.** The Resend API key
+  authenticates and one real end-to-end send was completed and delivered through
+  `resend_client.send_email` (Resend `id` `4729fbd8-…`, and via the endpoint
+  itself). But the configured `RESEND_FROM_EMAIL` (`…@svcet.ac.in`) is **not a
+  verified domain**, so with the shipped `.env` the endpoint correctly returns
+  `502 email_upstream_error` ("The svcet.ac.in domain is not verified"). To send
+  to the candidate address, verify a domain in the Resend dashboard and set
+  `RESEND_FROM_EMAIL` to an address on it. No code change.
+- **No provider-message-id column.** The `messages` table has no field for the
+  Resend id (no migration was added for this feature). The id is returned in the
+  API response and stored in the companion `engagement_events.metadata`; the
+  delivery webhook correlates on that.
+- **Inbound email (candidate replies) is deferred.** This phase implements
+  outbound + delivery-status only. Receiving replies as new inbound messages
+  would need a `provider_message_id` column for threading/idempotency; documented
+  as future work. `RESEND_WEBHOOK_SECRET` config is wired and ready.
+- **Delivery webhook** needs a public HTTPS URL (tunnel or deployment) to receive
+  Resend calls, and `RESEND_WEBHOOK_SECRET` set (empty in the shipped `.env`).
 
 ## 22. Production considerations
 
@@ -532,4 +570,70 @@ mutation flows are covered by the backend route tests and by manual verification
 | Client islands + `router.refresh()` | keep SSR first paint, minimal client JS | a refresh round-trip after each mutation |
 | Repositories return plain dicts | one place to swap the data source | schemas re-validate on the way out |
 | Risk override = new manual row | original AI assessment provably preserved | the "current" risk can flip source ai↔manual |
+
+## 26. Email integration
+
+Epitaxy sends **real transactional email through Resend**, server-side only.
+
+**Flow.** Communication composer → `lib/api.sendCandidateEmail` →
+`POST /api/v1/candidates/{id}/communications/email` → `services/email.send_candidate_email`
+→ `services/resend_client.send_email` (the **only** module that imports the Resend
+SDK) → Resend API → candidate inbox.
+
+- The **recipient is always the candidate record's `email`** — never a field from
+  the request body. HR cannot send to an arbitrary address.
+- Request is validated: subject 1–200, body 1–20000, optional `reply_to`
+  (`EmailStr`), unknown keys rejected, email format checked server-side, plain
+  text only (HTML is generated from the escaped text, not accepted as input).
+- **On Resend failure the API returns `502 email_upstream_error` and nothing is
+  persisted** — no fake "sent" message. Missing key → `503 email_not_configured`.
+- On success the message is stored in `messages` (`direction=outbound`,
+  `channel=email`, `status=sent`, `is_ai_generated` when an AI draft id was
+  passed), a companion `engagement_events` row carries the Resend message id
+  (the `messages` table has no column for it — **no migration was added**), the
+  conversation is touched, and `candidates.last_interaction_at` is updated (same
+  rule the rest of the app uses for outbound messages).
+- `RESEND_API_KEY` is read from the environment only — never logged, never
+  returned, never placed in an error message; SDK exceptions are caught and
+  re-raised without their text.
+
+**AI drafts.** The existing Groq endpoint (`POST …/ai/message`) is unchanged.
+The composer's "AI draft" button fills subject + body from its response and
+records the recommendation id; HR edits, then clicks Send. **AI never sends —
+HR is always the final sender.** Sending an AI draft marks that recommendation
+`accepted`.
+
+**Automation.** The engagement sweep still only creates a task + AI draft. It
+does **not** auto-send. HR reviews the task and sends from the composer.
+
+**Delivery-status webhook** (`POST /api/v1/webhooks/resend`) — Svix
+signature-verified against `RESEND_WEBHOOK_SECRET` (rejects every call with
+`401` when the secret is unset; an unverified payload is never trusted). It
+records `email.sent / delivered / bounced / failed` as timeline events,
+correlated to the outbound email by the Resend id in that email's event
+metadata. Needs a public HTTPS URL to receive Resend's calls.
+
+**Deferred:** receiving candidate replies as inbound messages (would need a
+`provider_message_id` column for threading/idempotency). Config for it
+(`RESEND_WEBHOOK_SECRET`) is wired and ready.
+
+### Setup
+
+```bash
+# backend/.env  (already configured locally; placeholders in .env.example)
+RESEND_API_KEY=re_...                     # server-side only, never commit
+RESEND_FROM_EMAIL=hr@your-verified-domain # a domain VERIFIED in your Resend account
+RESEND_FROM_NAME=HR
+RESEND_WEBHOOK_SECRET=whsec_...           # optional, for the delivery webhook
+RESEND_TIMEOUT_SECONDS=30
+
+# Resend dashboard → Domains → add + verify your sending domain (DNS records),
+# then set RESEND_FROM_EMAIL to an address on it. Until the domain is verified
+# Resend rejects the send and the API returns 502 (surfaced, not faked).
+
+cd backend  && uvicorn app.main:app --reload --port 8000
+cd frontend && npm run dev
+# Communication → pick candidate → Email → (optional) AI draft → edit → Send
 ```
+
+**Auth is still a local mock** and intentionally out of scope.

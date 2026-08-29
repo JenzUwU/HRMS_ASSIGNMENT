@@ -16,7 +16,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import DB, CandidateRow
+from app.api.deps import DB, CandidateRow, CurrentUser
 from app.db import repositories as repo
 from app.schemas.candidate import (
     CandidateDetail,
@@ -28,6 +28,11 @@ from app.schemas.candidate import (
 from app.schemas.common import Paginated
 from app.schemas.communication import CandidateCommunications, Message
 from app.schemas.engagement import EngagementJourney
+from app.schemas.email import (
+    CreateCandidateRequest,
+    SendCandidateEmailRequest,
+    SendCandidateEmailResponse,
+)
 from app.schemas.mutations import (
     CreateMessageRequest,
     CreateNoteRequest,
@@ -36,8 +41,12 @@ from app.schemas.mutations import (
     UpdateCandidateRequest,
     UpdateJourneyStepRequest,
 )
+from app.schemas.whatsapp import SendWhatsAppRequest, SendWhatsAppResponse
+from app.services import candidate_admin
 from app.services import candidates as service
+from app.services import email as email_service
 from app.services import mutations as write_service
+from app.services import whatsapp as whatsapp_service
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -74,6 +83,17 @@ def list_candidates(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.post("", response_model=CandidateDetail, status_code=201)
+def create_candidate(
+    db: DB, body: CreateCandidateRequest, user: CurrentUser
+) -> CandidateDetail:
+    return candidate_admin.create_candidate(
+        db,
+        body,
+        owner_recruiter_id=str(user.recruiter_id) if user.recruiter_id else None,
     )
 
 
@@ -151,6 +171,42 @@ def create_candidate_message(
     candidate: CandidateRow, db: DB, body: CreateMessageRequest
 ) -> Message:
     return write_service.create_message(db, candidate, body)
+
+
+@router.post(
+    "/{candidate_id}/communications/email",
+    response_model=SendCandidateEmailResponse,
+    status_code=201,
+)
+def send_candidate_communication_email(
+    candidate: CandidateRow, db: DB, body: SendCandidateEmailRequest
+) -> SendCandidateEmailResponse:
+    """Send a real email to the candidate through Gmail SMTP and persist it.
+
+    The recipient is always the candidate record's email - never a body field.
+    SMTP failure -> 502/503, nothing persisted.
+    """
+    return email_service.send_candidate_email(db, candidate, body)
+
+
+@router.post(
+    "/{candidate_id}/communications/whatsapp",
+    response_model=SendWhatsAppResponse,
+)
+def send_candidate_communication_whatsapp(
+    candidate: CandidateRow, db: DB, body: SendWhatsAppRequest
+) -> SendWhatsAppResponse:
+    """Send a WhatsApp message to the candidate through the configured provider.
+
+    WhatsApp is DISABLED by default - no provider is connected. Today this
+    returns:
+      * 422 whatsapp / validation_error - the candidate has no valid phone number
+      * 503 whatsapp_not_enabled        - WHATSAPP_ENABLED is false
+      * 503 whatsapp_not_configured     - enabled but no provider adapter
+    Nothing is ever sent or persisted while disabled. The recipient always comes
+    from the candidate record, never the request body.
+    """
+    return whatsapp_service.send_candidate_whatsapp(db, candidate, body)
 
 
 @router.patch(

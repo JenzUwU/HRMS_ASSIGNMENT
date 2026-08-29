@@ -20,6 +20,7 @@ import { ProgressBar } from "@/components/ui/ProgressBar";
 import { SelectField } from "@/components/ui/SelectField";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { CandidateActionMenu } from "@/components/dashboard/CandidateActionMenu";
+import { AddCandidateModal } from "@/components/candidates/AddCandidateModal";
 import { ApiError } from "@/lib/api-client";
 import { downloadXls } from "@/lib/export-xls";
 import { toast } from "@/lib/toast";
@@ -124,6 +125,7 @@ export default function CandidatesPage() {
   const [sort, setSort] = useState<SortKey | null>(null);
   const [hiddenCols, setHiddenCols] = useState<Set<ColKey>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   const [rows, setRows] = useState<CandidateListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -343,24 +345,42 @@ export default function CandidatesPage() {
         <p className="text-sm text-text-secondary">
           Track and manage all offered candidates through their post-offer journey.
         </p>
-        <button
-          type="button"
-          onClick={handleExport}
-          disabled={exporting}
-          className="group flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-charcoal transition-all duration-150 hover:-translate-y-px hover:border-orange/40 hover:bg-cream hover:shadow-[0_8px_20px_-10px_rgba(252,128,25,0.3)] active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {exporting ? (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-charcoal/40 border-t-transparent" />
-          ) : (
-            <GlassIcon
-              name="download"
-              size={16}
-              className="transition-transform duration-200 group-hover:translate-y-0.5"
-            />
-          )}
-          {exporting ? "Exporting…" : "Export"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exporting}
+            className="group flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-charcoal transition-all duration-150 hover:-translate-y-px hover:border-orange/40 hover:bg-cream hover:shadow-[0_8px_20px_-10px_rgba(252,128,25,0.3)] active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {exporting ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-charcoal/40 border-t-transparent" />
+            ) : (
+              <GlassIcon
+                name="download"
+                size={16}
+                className="transition-transform duration-200 group-hover:translate-y-0.5"
+              />
+            )}
+            {exporting ? "Exporting…" : "Export"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 rounded-xl bg-orange px-4 py-2.5 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-px hover:bg-orange/90 active:translate-y-0"
+          >
+            <GlassIcon name="employees" size={16} />
+            Add Candidate
+          </button>
+        </div>
       </div>
+
+      {showAdd && (
+        <AddCandidateModal
+          recruiters={recruiters}
+          onClose={() => setShowAdd(false)}
+          onCreated={load}
+        />
+      )}
 
       <Card className="mb-5">
         <div className="flex flex-wrap items-end gap-4">
