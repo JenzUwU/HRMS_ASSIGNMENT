@@ -8,6 +8,8 @@ from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging, logger
 
+configure_logging()
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

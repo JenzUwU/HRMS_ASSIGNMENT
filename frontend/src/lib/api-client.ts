@@ -42,6 +42,8 @@ export async function apiFetch<T>(
   const { body, params, headers, ...rest } = options;
 
   const res = await fetch(buildUrl(path, params), {
+    // This is an internal tool reading live data. Never serve a stale cache.
+    cache: "no-store",
     ...rest,
     headers: {
       "Content-Type": "application/json",

@@ -34,6 +34,13 @@ class Message(_Model):
 class Conversation(_Model):
     id: UUID
     candidate_id: UUID
+    candidate_name: str | None = None
+    candidate_initials: str | None = None
+    candidate_slug: str | None = None
+    candidate_role: str | None = None
+    candidate_location_city: str | None = None
+    candidate_status: str | None = None
+    candidate_current_stage: str | None = None
     channel: str
     subject: str
     last_message_at: datetime | None = None

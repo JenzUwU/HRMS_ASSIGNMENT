@@ -34,6 +34,8 @@ class CandidateNote(_Model):
     id: UUID
     candidate_id: UUID
     author_recruiter_id: UUID | None = None
+    author_name: str | None = None
+    author_initials: str | None = None
     body: str
     is_pinned: bool = False
     created_at: datetime

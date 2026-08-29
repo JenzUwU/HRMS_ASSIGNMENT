@@ -23,51 +23,100 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { RiskGauge } from "@/components/charts/RiskGauge";
 import { JourneyStepper } from "@/components/charts/JourneyStepper";
+import { ApiError } from "@/lib/api-client";
 import {
-  JOURNEY_STAGES,
   getCandidate,
-  journeyTimeline,
-  pendingActions,
-} from "@/lib/mock-data";
+  getCandidateCommunications,
+  getEngagement,
+  type Message,
+} from "@/lib/api";
+import {
+  STATUS_LABEL,
+  formatDate,
+  relativeDays,
+  relativeTime,
+  riskLabel,
+} from "@/lib/format";
+
+const STEP_STATUS_LABEL: Record<string, string> = {
+  completed: "Completed",
+  in_progress: "In Progress",
+  pending: "Pending",
+  skipped: "Skipped",
+};
 
 export default async function CandidateDetailsPage({
   params,
 }: PageProps<"/candidates/[id]">) {
   const { id } = await params;
-  const candidate = getCandidate(id);
-  if (!candidate) notFound();
 
-  const steps = JOURNEY_STAGES.map((stage, i) => ({
-    label: stage.label,
-    date:
-      i === 0
-        ? candidate.offerDate.replace(" 2025", "")
-        : i <= candidate.stageIndex
-          ? candidate.offerDate.replace(" 2025", "")
-          : i === JOURNEY_STAGES.length - 1
-            ? candidate.joiningDate.replace(" 2025", "")
-            : "",
-    status:
-      i < candidate.stageIndex
-        ? ("completed" as const)
-        : i === candidate.stageIndex
-          ? ("in_progress" as const)
-          : ("pending" as const),
-    statusLabel:
-      i < candidate.stageIndex
-        ? "Completed"
-        : i === candidate.stageIndex
-          ? "In Progress"
-          : "Pending",
+  let data;
+  try {
+    const [candidate, engagement, communications] = await Promise.all([
+      getCandidate(id),
+      getEngagement(id),
+      getCandidateCommunications(id),
+    ]);
+    data = { candidate, engagement, communications };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) notFound();
+    throw e;
+  }
+
+  const { candidate, engagement, communications } = data;
+
+  const steps = engagement.steps.map((s) => ({
+    label: s.label,
+    date: s.completed_at
+      ? formatDate(s.completed_at)
+      : s.due_date
+        ? `Due ${formatDate(s.due_date)}`
+        : "",
+    status: s.status as "completed" | "in_progress" | "pending",
+    statusLabel: STEP_STATUS_LABEL[s.status] ?? s.status,
   }));
 
+  const recentMessages: Message[] = communications.conversations
+    .flatMap((c) => c.messages)
+    .filter((m) => !m.is_internal_note && m.sent_at)
+    .sort(
+      (a, b) =>
+        new Date(b.sent_at as string).getTime() -
+        new Date(a.sent_at as string).getTime(),
+    )
+    .slice(0, 4);
+
+  const risk = engagement.risk ?? {
+    level: candidate.risk_level,
+    score: candidate.risk_score,
+    factors: [],
+    summary: null,
+  };
+
   const info = [
-    { label: "Recruiter", value: candidate.recruiter, icon: UserIcon },
+    { label: "Recruiter", value: candidate.recruiter_name, icon: UserIcon },
     { label: "Source", value: candidate.source, icon: IdentificationIcon },
-    { label: "Department", value: candidate.department, icon: BuildingOffice2Icon },
-    { label: "Employment Type", value: candidate.employmentType, icon: BriefcaseIcon },
+    {
+      label: "Department",
+      value: candidate.department ?? "Not set",
+      icon: BuildingOffice2Icon,
+    },
+    {
+      label: "Employment Type",
+      value: candidate.employment_type.replace("_", " "),
+      icon: BriefcaseIcon,
+    },
     { label: "Location", value: candidate.location, icon: MapPinIcon },
   ];
+
+  const note = candidate.latest_note;
+  const pendingDocCount = engagement.pending_documents.length;
+  const bannerText =
+    pendingDocCount > 0
+      ? `Waiting for the candidate to complete ${pendingDocCount} pending document${
+          pendingDocCount === 1 ? "" : "s"
+        }.`
+      : "The engagement journey is on track. Keep the cadence steady.";
 
   return (
     <AppShell title="Candidate Details">
@@ -77,7 +126,9 @@ export default async function CandidateDetailsPage({
             Candidates
           </Link>
           <ChevronRightIcon className="h-3.5 w-3.5 text-text-secondary" />
-          <span className="font-semibold text-charcoal">{candidate.name}</span>
+          <span className="font-semibold text-charcoal">
+            {candidate.full_name}
+          </span>
         </nav>
         <Link
           href="/candidates"
@@ -92,38 +143,50 @@ export default async function CandidateDetailsPage({
         <div className="space-y-4 xl:col-span-2">
           <Card>
             <div className="flex flex-wrap items-start gap-5">
-              <Avatar initials={candidate.initials} size="xl" tone="peach" online />
+              <Avatar
+                initials={candidate.initials}
+                size="xl"
+                tone="peach"
+                online
+              />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-3">
                   <h2 className="font-heading text-2xl font-bold text-charcoal">
-                    {candidate.name}
+                    {candidate.full_name}
                   </h2>
-                  <Badge tone="peach">{candidate.status}</Badge>
+                  <Badge tone="peach">
+                    {STATUS_LABEL[candidate.status] ?? candidate.status}
+                  </Badge>
                 </div>
                 <p className="mt-1 text-sm text-text-secondary">
-                  {candidate.role}, {candidate.location.split(",")[0]}
+                  {candidate.role}, {candidate.location_city ?? candidate.location}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-4 text-sm text-text-secondary">
                   <span className="flex items-center gap-1.5">
                     <EnvelopeIcon className="h-4 w-4" />
                     {candidate.email}
                   </span>
-                  <span className="flex items-center gap-1.5">
-                    <PhoneIcon className="h-4 w-4" />
-                    {candidate.phone}
-                  </span>
+                  {candidate.phone && (
+                    <span className="flex items-center gap-1.5">
+                      <PhoneIcon className="h-4 w-4" />
+                      {candidate.phone}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-5 text-sm">
                   <span className="text-text-secondary">
                     Offered on:{" "}
                     <span className="font-semibold text-charcoal">
-                      {candidate.offerDate}
+                      {formatDate(candidate.offer_date)}
                     </span>
                   </span>
                   <span className="text-text-secondary">
                     Joining on:{" "}
                     <span className="font-semibold text-charcoal">
-                      {candidate.joiningDate} (in {candidate.joiningDaysLeft} days)
+                      {formatDate(candidate.joining_date)}
+                      {candidate.joining_in_days >= 0
+                        ? ` (in ${candidate.joining_in_days} days)`
+                        : ""}
                     </span>
                   </span>
                 </div>
@@ -141,15 +204,19 @@ export default async function CandidateDetailsPage({
             </div>
           </Card>
 
-          <SectionCard title="Engagement Journey" action="View Full Journey" actionHref="/engagement-journey">
+          <SectionCard
+            title="Engagement Journey"
+            action="View Full Journey"
+            actionHref={`/engagement-journey?candidate=${candidate.slug}`}
+          >
             <JourneyStepper steps={steps} />
             <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-peach/40 px-4 py-3 text-sm">
               <span className="flex items-center gap-2 text-charcoal">
                 <InformationCircleIcon className="h-4 w-4 text-orange" />
-                Waiting for candidate to upload remaining documents.
+                {bannerText}
               </span>
               <Link
-                href="/engagement-journey"
+                href={`/engagement-journey?candidate=${candidate.slug}`}
                 className="flex items-center gap-1 font-semibold text-orange"
               >
                 View Documents
@@ -165,55 +232,78 @@ export default async function CandidateDetailsPage({
               actionHref="/communication"
               footer={{ label: "Go to Communication", href: "/communication" }}
             >
-              <ul className="space-y-4">
-                {journeyTimeline.slice(0, 4).map((e) => (
-                  <li key={e.id} className="flex gap-3">
-                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-peach text-orange">
-                      {e.id === "2" ? (
-                        <ChatBubbleLeftRightIcon className="h-4 w-4" />
-                      ) : (
-                        <EnvelopeIcon className="h-4 w-4" />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-charcoal">
-                        {e.title}
-                      </p>
-                      <p className="text-xs text-text-secondary">
-                        Sent to {candidate.name}
-                      </p>
-                    </div>
-                    <span className="whitespace-nowrap text-xs text-text-secondary">
-                      {e.date}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {recentMessages.length === 0 ? (
+                <p className="py-6 text-center text-sm text-text-secondary">
+                  No messages yet.
+                </p>
+              ) : (
+                <ul className="space-y-4">
+                  {recentMessages.map((m) => (
+                    <li key={m.id} className="flex gap-3">
+                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-peach text-orange">
+                        {m.channel === "email" ? (
+                          <EnvelopeIcon className="h-4 w-4" />
+                        ) : (
+                          <ChatBubbleLeftRightIcon className="h-4 w-4" />
+                        )}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-charcoal">
+                          {m.subject ?? m.body.slice(0, 48)}
+                        </p>
+                        <p className="text-xs text-text-secondary">
+                          {m.direction === "outbound"
+                            ? `Sent to ${candidate.full_name}`
+                            : `From ${candidate.full_name}`}
+                        </p>
+                      </div>
+                      <span className="whitespace-nowrap text-xs text-text-secondary">
+                        {relativeTime(m.sent_at)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </SectionCard>
 
             <SectionCard
               title="Upcoming / Pending Actions"
               action="View All"
-              actionHref="/engagement-journey"
-              footer={{ label: "Go to Engagement Journey", href: "/engagement-journey" }}
+              actionHref={`/engagement-journey?candidate=${candidate.slug}`}
+              footer={{
+                label: "Go to Engagement Journey",
+                href: `/engagement-journey?candidate=${candidate.slug}`,
+              }}
             >
-              <ul className="space-y-4">
-                {pendingActions.map((a) => (
-                  <li key={a.id} className="flex items-start gap-3">
-                    <span className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 border-border" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-charcoal">
-                        {a.title}
-                      </p>
-                      <p className="text-xs text-text-secondary">{a.detail}</p>
-                    </div>
-                    <span className="flex items-center gap-1 whitespace-nowrap text-xs text-text-secondary">
-                      <CalendarDaysIcon className="h-3.5 w-3.5" />
-                      {a.date}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {engagement.upcoming_tasks.length === 0 ? (
+                <p className="py-6 text-center text-sm text-text-secondary">
+                  No pending actions.
+                </p>
+              ) : (
+                <ul className="space-y-4">
+                  {engagement.upcoming_tasks.map((t) => (
+                    <li key={t.id} className="flex items-start gap-3">
+                      <span className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 border-border" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-charcoal">
+                          {t.title}
+                        </p>
+                        {t.detail && (
+                          <p className="text-xs text-text-secondary">
+                            {t.detail}
+                          </p>
+                        )}
+                      </div>
+                      {t.due_date && (
+                        <span className="flex items-center gap-1 whitespace-nowrap text-xs text-text-secondary">
+                          <CalendarDaysIcon className="h-3.5 w-3.5" />
+                          {formatDate(t.due_date)}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </SectionCard>
           </div>
         </div>
@@ -225,22 +315,42 @@ export default async function CandidateDetailsPage({
             </h3>
             <div className="mt-3 flex items-start justify-between">
               <div>
-                <Badge tone="coral" dot>
-                  {candidate.riskLevel} Risk
+                <Badge
+                  tone={
+                    risk.level === "high"
+                      ? "coral"
+                      : risk.level === "medium"
+                        ? "amber"
+                        : "teal"
+                  }
+                  dot
+                >
+                  {riskLabel(risk.level)} Risk
                 </Badge>
                 <p className="mt-4 text-sm text-text-secondary">Risk Score</p>
                 <p className="font-heading text-3xl font-bold text-charcoal">
-                  {candidate.riskScore}/100
+                  {risk.score}/100
                 </p>
               </div>
-              <RiskGauge score={candidate.riskScore} />
+              <RiskGauge score={risk.score} />
             </div>
             <p className="mt-3 text-sm text-text-secondary">
-              Last interaction was {candidate.lastInteraction}. Consider reaching out.
+              {candidate.days_since_interaction == null
+                ? "No interaction recorded yet."
+                : `Last interaction was ${relativeDays(
+                    candidate.days_since_interaction,
+                  ).toLowerCase()}. ${
+                    risk.level === "low"
+                      ? "Engagement looks healthy."
+                      : "Consider reaching out."
+                  }`}
             </p>
-            <button className="mt-4 w-full rounded-xl border border-orange py-2.5 text-sm font-semibold text-orange hover:bg-peach/40">
+            <Link
+              href={`/engagement-journey?candidate=${candidate.slug}`}
+              className="mt-4 block w-full rounded-xl border border-orange py-2.5 text-center text-sm font-semibold text-orange hover:bg-peach/40"
+            >
               View Risk Insights
-            </button>
+            </Link>
           </Card>
 
           <Card>
@@ -249,20 +359,20 @@ export default async function CandidateDetailsPage({
             </h3>
             <dl className="mt-4 space-y-3 text-sm">
               {info.map((row) => (
-                <div key={row.label} className="flex items-center justify-between gap-3">
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between gap-3"
+                >
                   <dt className="flex items-center gap-2 text-text-secondary">
                     <row.icon className="h-4 w-4" />
                     {row.label}
                   </dt>
-                  <dd className="text-right font-semibold text-charcoal">
+                  <dd className="text-right font-semibold capitalize text-charcoal">
                     {row.value}
                   </dd>
                 </div>
               ))}
             </dl>
-            <button className="mt-4 w-full rounded-xl border border-border py-2.5 text-sm font-semibold text-charcoal hover:bg-cream">
-              View Full Profile
-            </button>
           </Card>
 
           <Card>
@@ -275,12 +385,18 @@ export default async function CandidateDetailsPage({
                 Edit
               </button>
             </div>
-            <div className="mt-3 rounded-xl bg-cream/70 p-4 text-sm text-text-secondary">
-              <p>{candidate.hrNote}</p>
-              <p className="mt-3 text-xs font-medium text-charcoal">
-                {candidate.hrNoteBy}, {candidate.hrNoteDate}
+            {note ? (
+              <div className="mt-3 rounded-xl bg-cream/70 p-4 text-sm text-text-secondary">
+                <p>{note.body}</p>
+                <p className="mt-3 text-xs font-medium text-charcoal">
+                  {note.author_name ?? "HR"}, {formatDate(note.created_at)}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-text-secondary">
+                No notes for this candidate yet.
               </p>
-            </div>
+            )}
           </Card>
         </div>
       </div>

@@ -13,22 +13,46 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-import httpx
+import time
+
 from postgrest import APIError
 from supabase import Client
 
 from app.core.errors import UpstreamError
+from app.core.logging import logger
 
 Row = dict[str, Any]
 
+_MAX_ATTEMPTS = 3
+
 
 def _run(query) -> Any:
-    try:
-        return query.execute()
-    except APIError as exc:  # SQL / PostgREST error (bad column, RLS, constraint)
-        raise UpstreamError(f"Database request failed: {exc.message}") from exc
-    except httpx.HTTPError as exc:  # transport failure (DNS, timeout, refused)
-        raise UpstreamError(f"Could not reach the database: {exc}") from exc
+    """Execute a PostgREST query, retrying transient transport failures.
+
+    A long-lived server can hold a pooled connection that the Supabase edge has
+    already closed (GOAWAY / ConnectionTerminated). Those raise httpx errors and
+    clear on a fresh connection, so we retry. PostgREST APIErrors (bad SQL, RLS)
+    are not retried.
+    """
+    last: Exception | None = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            return query.execute()
+        except APIError as exc:
+            # A real PostgREST error (bad column, RLS, constraint). Not retryable.
+            raise UpstreamError(f"Database request failed: {exc.message}") from exc
+        except Exception as exc:  # noqa: BLE001
+            # Transport / protocol failures (ConnectionTerminated, timeouts,
+            # HTTP/2 stream resets). These clear on a fresh connection.
+            last = exc
+            if attempt < _MAX_ATTEMPTS:
+                logger.warning(
+                    "Supabase call failed (attempt %d/%d): %s: %s",
+                    attempt, _MAX_ATTEMPTS, type(exc).__name__, exc,
+                )
+                time.sleep(0.25 * attempt)
+                continue
+    raise UpstreamError(f"Could not reach the database: {last}") from last
 
 
 # ---------------------------------------------------------------------------
@@ -151,12 +175,17 @@ def list_risk_assessments(db: Client, candidate_id: UUID) -> list[Row]:
 # ---------------------------------------------------------------------------
 
 def list_notes(db: Client, candidate_id: UUID) -> list[Row]:
-    return _run(
+    rows = _run(
         db.table("candidate_notes")
-        .select("*")
+        .select("*, author:recruiters(full_name, initials)")
         .eq("candidate_id", str(candidate_id))
         .order("created_at", desc=True)
     ).data or []
+    for row in rows:
+        author = row.pop("author", None) or {}
+        row["author_name"] = author.get("full_name")
+        row["author_initials"] = author.get("initials")
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -204,22 +233,43 @@ def list_messages_for_candidate(db: Client, candidate_id: UUID) -> list[Row]:
     ).data or []
 
 
+_CONV_SELECT = (
+    "*, candidate:candidates(full_name, initials, slug, role, "
+    "location_city, status, current_stage)"
+)
+
+
+def _flatten_conversation(row: Row) -> Row:
+    cand = row.pop("candidate", None) or {}
+    row["candidate_name"] = cand.get("full_name")
+    row["candidate_initials"] = cand.get("initials")
+    row["candidate_slug"] = cand.get("slug")
+    row["candidate_role"] = cand.get("role")
+    row["candidate_location_city"] = cand.get("location_city")
+    row["candidate_status"] = cand.get("status")
+    row["candidate_current_stage"] = cand.get("current_stage")
+    return row
+
+
 def list_conversations(db: Client, *, page: int = 1, page_size: int = 20) -> tuple[list[Row], int]:
     offset = (page - 1) * page_size
     res = _run(
         db.table("conversations")
-        .select("*", count="exact")
+        .select(_CONV_SELECT, count="exact")
         .order("last_message_at", desc=True)
         .range(offset, offset + page_size - 1)
     )
-    return res.data or [], res.count or 0
+    return [_flatten_conversation(r) for r in (res.data or [])], res.count or 0
 
 
 def get_conversation(db: Client, conversation_id: UUID) -> Row | None:
     res = _run(
-        db.table("conversations").select("*").eq("id", str(conversation_id)).limit(1)
+        db.table("conversations")
+        .select(_CONV_SELECT)
+        .eq("id", str(conversation_id))
+        .limit(1)
     )
-    return res.data[0] if res.data else None
+    return _flatten_conversation(res.data[0]) if res.data else None
 
 
 def list_messages_for_conversation(db: Client, conversation_id: UUID) -> list[Row]:

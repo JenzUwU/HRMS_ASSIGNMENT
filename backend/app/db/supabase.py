@@ -8,6 +8,9 @@ never talks to Supabase directly and never sees these credentials.
 The Supabase secret key (new API key system, ``sb_secret_...``) is used so the
 backend can read every row regardless of Row Level Security. It replaces the
 legacy ``service_role`` key. RLS and Supabase Auth are a later phase.
+
+Transient connection failures (a pooled connection closed by the Supabase edge
+after idle) are retried in app/db/repositories.py, not here.
 """
 from __future__ import annotations
 
