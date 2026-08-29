@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/*
+  HRMS Post Offer Engagement design tokens.
+  Swiggy inspired: warm, modern, human. Light only (no dark mode).
+*/
+@theme {
+  /* Brand */
+  --color-orange: #fc8019;
+  --color-charcoal: #2b2520;
+  --color-cream: #fff8f2;
+  --color-peach: #ffe4d0;
+  --color-teal: #2fa58d;
+  --color-coral: #e85d4a;
+
+  /* Text */
+  --color-text-primary: #292929;
+  --color-text-secondary: #747474;
+
+  /* Semantic aliases */
+  --color-background: #fff8f2;
+  --color-surface: #ffffff;
+  --color-border: #f0e6dd;
+  --color-success: #2fa58d;
+  --color-danger: #e85d4a;
+  --color-warning: #f2a516;
+
+  /* Typography */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-sora), var(--font-inter), ui-sans-serif, sans-serif;
+
+  /* Radius */
+  --radius-card: 16px;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+}

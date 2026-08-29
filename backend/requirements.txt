@@ -1,0 +1,12 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.13.5
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+httpx==0.28.1
+
+# Database access (server-side only, used through app/db/supabase.py)
+supabase==2.31.0
+
+# Added later, kept here for reference (not imported yet):
+# groq==0.15.0
