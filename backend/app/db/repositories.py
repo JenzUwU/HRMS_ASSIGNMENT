@@ -343,13 +343,20 @@ def analytics_summary(db: Client) -> Row:
     avg_engagement_frequency = (
         round(total_events / total_offered, 1) if total_offered else 0.0
     )
+    # joined / offered: a point-in-time snapshot while the pipeline is still moving.
     conversion = round(100.0 * joined / total_offered, 1) if total_offered else 0.0
+    # joined / (joined + declined): conversion among candidates who have resolved.
+    resolved = joined + declined
+    resolved_rate = round(100.0 * joined / resolved, 1) if resolved else 0.0
+    in_progress = total_offered - resolved
 
     return {
         "total_offered": total_offered,
         "joined": joined,
         "declined": declined,
+        "in_progress": in_progress,
         "offer_to_join_conversion": conversion,
+        "resolved_conversion_rate": resolved_rate,
         "high_risk_candidates": high_risk,
         "joining_next_7_days": joining_within(7),
         "joining_next_15_days": joining_within(15),

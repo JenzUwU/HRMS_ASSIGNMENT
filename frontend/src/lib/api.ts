@@ -230,7 +230,9 @@ export interface AnalyticsSummary {
   total_offered: number;
   joined: number;
   declined: number;
+  in_progress: number;
   offer_to_join_conversion: number;
+  resolved_conversion_rate: number;
   high_risk_candidates: number;
   joining_next_7_days: number;
   joining_next_15_days: number;

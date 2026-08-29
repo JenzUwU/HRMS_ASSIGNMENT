@@ -19,7 +19,9 @@ class AnalyticsSummary(_Model):
     total_offered: int
     joined: int
     declined: int
+    in_progress: int
     offer_to_join_conversion: float
+    resolved_conversion_rate: float
     high_risk_candidates: int
     joining_next_7_days: int
     joining_next_15_days: int

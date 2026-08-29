@@ -1,7 +1,5 @@
 import {
-  ArrowDownIcon,
   ArrowTrendingUpIcon,
-  ArrowUpIcon,
   CalendarDaysIcon,
   ChartBarIcon,
   CheckCircleIcon,
@@ -19,28 +17,106 @@ import { Card, SectionCard } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
 import { TrendChart } from "@/components/charts/TrendChart";
 import { cn } from "@/lib/cn";
+import { ApiError } from "@/lib/api-client";
 import {
-  analyticsStats,
-  conversionTrend,
-  joiningWindow,
-  recruiterRates,
-  stageDropoffs,
-} from "@/lib/mock-data";
+  getAnalyticsSummary,
+  getConversionTrend,
+  getRecruiterConversion,
+  getStageFunnel,
+} from "@/lib/api";
+import { STAGE_LABEL, formatDate } from "@/lib/format";
+import { notFound } from "next/navigation";
 
-const kpiIcons = [UsersIcon, ArrowTrendingUpIcon, CalendarDaysIcon, ExclamationTriangleIcon, ChartBarIcon];
-const stageIcons = [CheckCircleIcon, EnvelopeIcon, DocumentTextIcon, UserIcon, CalendarDaysIcon, FlagIcon];
+const STAGE_ICON = [
+  CheckCircleIcon,
+  EnvelopeIcon,
+  DocumentTextIcon,
+  UserIcon,
+  CalendarDaysIcon,
+  FlagIcon,
+];
 
-function funnelColor(retained: number) {
-  if (retained >= 90) return "bg-teal";
-  if (retained >= 70) return "bg-teal/70";
-  if (retained >= 55) return "bg-orange/80";
-  if (retained >= 45) return "bg-orange";
+function retainedColor(pct: number) {
+  if (pct >= 90) return "bg-teal";
+  if (pct >= 70) return "bg-teal/70";
+  if (pct >= 55) return "bg-orange/80";
+  if (pct >= 45) return "bg-orange";
   return "bg-charcoal/40";
 }
 
-export default function AnalyticsPage() {
+export default async function AnalyticsPage() {
+  let data;
+  try {
+    const [summary, funnel, recruiters, trend] = await Promise.all([
+      getAnalyticsSummary(),
+      getStageFunnel(),
+      getRecruiterConversion(),
+      getConversionTrend(),
+    ]);
+    data = { summary, funnel, recruiters, trend };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) notFound();
+    throw e;
+  }
+  const { summary, funnel, recruiters, trend } = data;
+
+  const base = funnel[0]?.candidates_reached ?? 0;
+  const stageRows = funnel.map((f, i) => {
+    const prev = i === 0 ? f.candidates_reached : funnel[i - 1].candidates_reached;
+    const dropoff = Math.max(0, prev - f.candidates_reached);
+    const dropoffPct = prev > 0 ? Math.round((dropoff / prev) * 1000) / 10 : 0;
+    const retained =
+      base > 0 ? Math.round((f.candidates_reached / base) * 1000) / 10 : 0;
+    return { ...f, dropoff, dropoffPct, retained };
+  });
+
+  const trendData = trend.map((t) => ({
+    week: formatDate(t.week_start).replace(/ \d{4}$/, ""),
+    value: t.cumulative_conversion_rate ?? 0,
+  }));
+
+  const totalOffered = recruiters.reduce((s, r) => s + r.offered, 0);
+  const totalJoined = recruiters.reduce((s, r) => s + r.joined, 0);
+  const avgRate =
+    totalOffered > 0 ? Math.round((totalJoined / totalOffered) * 1000) / 10 : 0;
+
+  const kpis = [
+    {
+      label: "Total Offered Candidates",
+      value: String(summary.total_offered),
+      sub: `${summary.joined} joined, ${summary.declined} declined, ${summary.in_progress} in progress`,
+      icon: UsersIcon,
+    },
+    {
+      label: "Offer-to-Join Conversion",
+      value: `${summary.resolved_conversion_rate}%`,
+      sub: `${summary.joined} of ${summary.joined + summary.declined} resolved candidates joined`,
+      icon: ArrowTrendingUpIcon,
+    },
+    {
+      label: "High-Risk Candidates",
+      value: String(summary.high_risk_candidates),
+      sub:
+        summary.total_offered > 0
+          ? `${Math.round(
+              (summary.high_risk_candidates / summary.total_offered) * 100,
+            )}% of all offered`
+          : "",
+      icon: ExclamationTriangleIcon,
+    },
+    {
+      label: "Average Engagement Frequency",
+      value: String(summary.average_engagement_frequency),
+      sub: "engagement events per candidate",
+      icon: ChartBarIcon,
+    },
+  ];
+
   return (
-    <AppShell title="Analytics Dashboard" searchPlaceholder="Search reports, recruiters, roles...">
+    <AppShell
+      title="Analytics Dashboard"
+      searchPlaceholder="Search reports, recruiters, roles..."
+    >
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-text-secondary">
           Track post-offer engagement and conversion performance.
@@ -48,7 +124,7 @@ export default function AnalyticsPage() {
         <div className="flex gap-2">
           <span className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-medium text-charcoal">
             <CalendarDaysIcon className="h-4 w-4 text-orange" />
-            20 May 2025 - 19 Jun 2025
+            All offered candidates
           </span>
           <button className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-charcoal hover:bg-cream">
             <FunnelIcon className="h-4 w-4" />
@@ -58,8 +134,8 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        {analyticsStats.slice(0, 2).map((s, i) => (
-          <Kpi key={s.label} {...s} icon={kpiIcons[i]} />
+        {kpis.slice(0, 2).map((k) => (
+          <Kpi key={k.label} {...k} />
         ))}
 
         <Card className="flex flex-col gap-3">
@@ -72,23 +148,23 @@ export default function AnalyticsPage() {
             </span>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
-            {joiningWindow.map((j) => (
+            {[
+              { window: "7 Days", value: summary.joining_next_7_days },
+              { window: "15 Days", value: summary.joining_next_15_days },
+              { window: "30 Days", value: summary.joining_next_30_days },
+            ].map((j) => (
               <div key={j.window}>
                 <p className="text-xs text-text-secondary">{j.window}</p>
                 <p className="font-heading text-2xl font-bold text-charcoal">
                   {j.value}
-                </p>
-                <p className="flex items-center justify-center gap-0.5 text-[11px] font-semibold text-teal">
-                  <ArrowUpIcon className="h-2.5 w-2.5" />
-                  {j.delta}
                 </p>
               </div>
             ))}
           </div>
         </Card>
 
-        {analyticsStats.slice(2).map((s, i) => (
-          <Kpi key={s.label} {...s} icon={kpiIcons[i + 3]} />
+        {kpis.slice(2).map((k) => (
+          <Kpi key={k.label} {...k} />
         ))}
       </div>
 
@@ -99,38 +175,40 @@ export default function AnalyticsPage() {
               <thead>
                 <tr className="text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">
                   <th className="pb-3">Stage</th>
-                  <th className="pb-3">Candidates</th>
+                  <th className="pb-3">Reached</th>
                   <th className="pb-3">Drop-off</th>
                   <th className="pb-3 text-right">Retained</th>
                 </tr>
               </thead>
               <tbody>
-                {stageDropoffs.map((s, i) => {
-                  const Icon = stageIcons[i];
+                {stageRows.map((s, i) => {
+                  const Icon = STAGE_ICON[i] ?? FlagIcon;
                   return (
                     <tr key={s.stage} className="border-t border-border">
                       <td className="py-2.5">
                         <span className="flex items-center gap-2 font-medium text-charcoal">
                           <Icon className="h-4 w-4 text-teal" />
-                          {s.stage}
+                          {STAGE_LABEL[s.stage] ?? s.stage}
                         </span>
                       </td>
                       <td className="py-2.5 text-text-secondary">
-                        {s.candidates}
+                        {s.candidates_reached}
                       </td>
                       <td className="py-2.5 text-text-secondary">
-                        {s.dropoff > 0 ? `${s.dropoff} (${s.dropoffPct}%)` : "0"}
+                        {s.dropoff > 0
+                          ? `${s.dropoff} (${s.dropoffPct}%)`
+                          : "0"}
                       </td>
                       <td className="py-2.5">
                         <div className="flex items-center justify-end gap-2">
                           <span
                             className={cn(
                               "h-4 rounded",
-                              funnelColor(s.retained),
+                              retainedColor(s.retained),
                             )}
                             style={{ width: `${Math.max(12, s.retained)}%` }}
                           />
-                          <span className="w-12 text-right font-semibold text-charcoal">
+                          <span className="w-14 text-right font-semibold text-charcoal">
                             {s.retained}%
                           </span>
                         </div>
@@ -146,7 +224,7 @@ export default function AnalyticsPage() {
               Overall Offer-to-Join Conversion
             </span>
             <span className="font-heading text-lg font-bold text-orange">
-              62.5%
+              {summary.resolved_conversion_rate}%
             </span>
           </div>
         </SectionCard>
@@ -163,12 +241,12 @@ export default function AnalyticsPage() {
                 </tr>
               </thead>
               <tbody>
-                {recruiterRates.map((r) => (
-                  <tr key={r.recruiter} className="border-t border-border">
+                {recruiters.map((r) => (
+                  <tr key={r.recruiter_id} className="border-t border-border">
                     <td className="py-2.5">
                       <span className="flex items-center gap-2 font-medium text-charcoal">
                         <Avatar initials={r.initials} size="sm" tone="peach" />
-                        {r.recruiter}
+                        {r.recruiter_name}
                       </span>
                     </td>
                     <td className="py-2.5 text-text-secondary">{r.offered}</td>
@@ -178,11 +256,11 @@ export default function AnalyticsPage() {
                         <div className="h-1.5 w-24 rounded-full bg-border">
                           <div
                             className="h-full rounded-full bg-teal"
-                            style={{ width: `${r.rate}%` }}
+                            style={{ width: `${r.offer_to_join_rate ?? 0}%` }}
                           />
                         </div>
                         <span className="w-12 text-right font-semibold text-charcoal">
-                          {r.rate}%
+                          {r.offer_to_join_rate ?? 0}%
                         </span>
                       </div>
                     </td>
@@ -194,19 +272,26 @@ export default function AnalyticsPage() {
           <div className="mt-3 flex items-center justify-between rounded-xl bg-peach/40 px-4 py-3 text-sm">
             <span className="font-semibold text-charcoal">Total / Average</span>
             <span className="flex gap-6 font-heading font-bold text-orange">
-              <span>248</span>
-              <span>134</span>
-              <span>62.5%</span>
+              <span>{totalOffered}</span>
+              <span>{totalJoined}</span>
+              <span>{avgRate}%</span>
             </span>
           </div>
         </SectionCard>
       </div>
 
       <SectionCard title="Offer-to-Join Conversion Trend" className="mt-5">
-        <TrendChart data={conversionTrend} />
+        {trendData.length > 1 ? (
+          <TrendChart data={trendData} />
+        ) : (
+          <p className="py-10 text-center text-sm text-text-secondary">
+            Not enough history to plot a trend yet.
+          </p>
+        )}
         <p className="mt-2 flex items-center gap-1.5 text-xs text-text-secondary">
           <InformationCircleIcon className="h-3.5 w-3.5" />
-          Conversion rate is calculated as Joined divided by Offered.
+          Cumulative conversion by week, calculated as joined divided by offered
+          for all candidates offered up to that week.
         </p>
       </SectionCard>
     </AppShell>
@@ -216,15 +301,11 @@ export default function AnalyticsPage() {
 function Kpi({
   label,
   value,
-  delta,
-  deltaDir,
   sub,
   icon: Icon,
 }: {
   label: string;
   value: string;
-  delta?: string;
-  deltaDir?: string;
   sub?: string;
   icon: React.ComponentType<{ className?: string }>;
 }) {
@@ -237,22 +318,7 @@ function Kpi({
         <span className="text-sm font-medium text-text-secondary">{label}</span>
       </div>
       <p className="font-heading text-3xl font-semibold text-charcoal">{value}</p>
-      <p className="flex items-center gap-1.5 text-xs">
-        <span
-          className={cn(
-            "inline-flex items-center gap-0.5 font-semibold",
-            deltaDir === "down" ? "text-coral" : "text-teal",
-          )}
-        >
-          {deltaDir === "down" ? (
-            <ArrowDownIcon className="h-3 w-3" />
-          ) : (
-            <ArrowUpIcon className="h-3 w-3" />
-          )}
-          {delta}
-        </span>
-        <span className="text-text-secondary">{sub}</span>
-      </p>
+      {sub && <p className="text-xs text-text-secondary">{sub}</p>}
     </Card>
   );
 }

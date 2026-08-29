@@ -5,8 +5,9 @@ import {
   FlagIcon,
   UserIcon,
 } from "@heroicons/react/24/solid";
-import type { StepStatus } from "@/lib/mock-data";
 import { cn } from "@/lib/cn";
+
+export type StepStatus = "completed" | "in_progress" | "pending";
 
 const icons = [CheckIcon, CheckIcon, DocumentTextIcon, UserIcon, CalendarDaysIcon, FlagIcon];
 

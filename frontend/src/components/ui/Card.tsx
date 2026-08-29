@@ -7,7 +7,7 @@ export function Card({
   className,
   as: Tag = "div",
 }: {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   className?: string;
   as?: React.ElementType;
 }) {
