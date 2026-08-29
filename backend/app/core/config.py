@@ -63,8 +63,10 @@ class Settings(BaseSettings):
     # from. IMAP must be enabled on the account; the Google App Password
     # (SMTP_PASSWORD) also authenticates IMAP, so IMAP_USERNAME / IMAP_PASSWORD
     # default to the SMTP ones when unset. Server-side only; never logged.
-    # POST /api/v1/webhooks/inbound-email/poll is gated by INBOUND_POLL_TOKEN
-    # and only runs when INBOUND_EMAIL_ENABLED is true.
+    # POST /api/v1/webhooks/inbound-email/poll is gated by INBOUND_POLL_TOKEN.
+    # When INBOUND_EMAIL_ENABLED is true AND IMAP is configured, an in-process
+    # background loop (app/services/inbound_scheduler.py) also polls every
+    # INBOUND_EMAIL_POLL_INTERVAL_SECONDS. Assumes a single backend worker.
     imap_host: str | None = "imap.gmail.com"
     imap_port: int = 993
     imap_username: str | None = None
@@ -74,6 +76,7 @@ class Settings(BaseSettings):
     inbound_email_enabled: bool = False
     inbound_poll_max: int = 25
     inbound_poll_token: str | None = Field(default=None, repr=False)
+    inbound_email_poll_interval_seconds: int = 120
 
     @property
     def imap_user(self) -> str | None:

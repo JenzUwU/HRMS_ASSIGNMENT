@@ -10,14 +10,19 @@
 services:
   backend:
     build: ./backend
+    # ONE replica only. The backend runs single-worker uvicorn and hosts two
+    # in-process background loops (engagement sweep + inbound-email polling).
+    # Scaling this service would start duplicate loops.
     ports:
       # host:container - change the host side via BACKEND_PORT if 8000 is taken.
       - "${BACKEND_PORT:-8000}:8000"
     env_file:
+      # All backend config, incl. INBOUND_EMAIL_ENABLED and
+      # INBOUND_EMAIL_POLL_INTERVAL_SECONDS (default 120). See backend/.env.example.
       - ./backend/.env
     environment:
-      # Container-appropriate overrides (the browser origin the API must allow,
-      # and the in-process scheduler stays off - drive the sweep from cron).
+      # Container-appropriate overrides. The engagement-sweep loop stays off
+      # (drive it from cron); the inbound-email loop follows backend/.env.
       BACKEND_CORS_ORIGINS: "${FRONTEND_ORIGIN:-http://localhost:3000}"
       AUTOMATION_ENABLED: "false"
       ENVIRONMENT: "production"

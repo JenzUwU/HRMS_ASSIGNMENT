@@ -7,7 +7,7 @@ from app.api.router import api_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging, logger
-from app.services import scheduler
+from app.services import inbound_scheduler, scheduler
 
 configure_logging()
 
@@ -17,7 +17,9 @@ async def lifespan(_: FastAPI):
     configure_logging()
     logger.info("Starting %s (%s)", settings.app_name, settings.environment)
     scheduler.start()  # no-op unless AUTOMATION_ENABLED=true
+    inbound_scheduler.start()  # no-op unless INBOUND_EMAIL_ENABLED=true + IMAP set
     yield
+    await inbound_scheduler.stop()
     await scheduler.stop()
     logger.info("Shutting down %s", settings.app_name)
 
