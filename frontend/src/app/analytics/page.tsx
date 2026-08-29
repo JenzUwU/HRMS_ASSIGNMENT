@@ -138,14 +138,18 @@ export default async function AnalyticsPage() {
           <Kpi key={k.label} {...k} />
         ))}
 
-        <Card className="flex flex-col gap-3">
+        <Card className="flex h-full flex-col gap-3">
           <div className="flex items-center gap-3">
-            <GlassIcon name="leave" size={40} />
+            <GlassIcon
+              name="leave"
+              size={40}
+              className="transition-transform duration-200 group-hover/card:scale-105"
+            />
             <span className="text-sm font-medium text-text-secondary">
               Candidates Joining in
             </span>
           </div>
-          <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="grid grid-cols-3 gap-2 text-center transition-transform duration-200 group-hover/card:-translate-y-0.5">
             {[
               { window: "7 Days", value: summary.joining_next_7_days },
               { window: "15 Days", value: summary.joining_next_15_days },
@@ -184,14 +188,14 @@ export default async function AnalyticsPage() {
                   return (
                     <tr
                       key={s.stage}
-                      className="group border-t border-border transition-colors hover:bg-peach/20"
+                      className="group/row border-t border-border transition-colors hover:bg-peach/20"
                     >
                       <td className="py-2.5">
-                        <span className="flex items-center gap-2 font-medium text-charcoal transition-colors group-hover:text-orange">
+                        <span className="flex items-center gap-2 font-medium text-charcoal transition-colors group-hover/row:text-orange">
                           <GlassIcon
                             name={glass}
                             size={16}
-                            className="transition-transform duration-200 group-hover:-translate-y-0.5"
+                            className="transition-transform duration-200 group-hover/row:-translate-y-0.5"
                           />
                           {STAGE_LABEL[s.stage] ?? s.stage}
                         </span>
@@ -249,19 +253,19 @@ export default async function AnalyticsPage() {
                 {recruiters.map((r) => (
                   <tr
                     key={r.recruiter_id}
-                    className="group border-t border-border transition-colors hover:bg-peach/20"
+                    className="group/row border-t border-border transition-colors hover:bg-peach/20"
                   >
                     <td className="py-2.5">
                       <Link
                         href={`/candidates?recruiter=${r.recruiter_id}`}
                         title={`View ${r.recruiter_name}'s candidates`}
-                        className="flex items-center gap-2 font-medium text-charcoal transition-colors group-hover:text-orange hover:underline"
+                        className="flex items-center gap-2 font-medium text-charcoal transition-colors group-hover/row:text-orange hover:underline"
                       >
                         <Avatar
                           initials={r.initials}
                           size="sm"
                           tone="peach"
-                          className="transition-transform duration-200 group-hover:-translate-y-px"
+                          className="transition-transform duration-200 group-hover/row:-translate-y-px"
                         />
                         {r.recruiter_name}
                       </Link>
@@ -334,11 +338,11 @@ function Kpi({
         <GlassIcon
           name={glassIcon}
           size={40}
-          className="transition-transform duration-200 group-hover:scale-105"
+          className="transition-transform duration-200 group-hover/card:scale-105"
         />
         <span className="text-sm font-medium text-text-secondary">{label}</span>
       </div>
-      <p className="font-heading text-3xl font-semibold text-charcoal transition-transform duration-200 group-hover:-translate-y-0.5">
+      <p className="font-heading text-3xl font-semibold text-charcoal transition-transform duration-200 group-hover/card:-translate-y-0.5">
         {value}
       </p>
       {sub && <p className="text-xs text-text-secondary">{sub}</p>}

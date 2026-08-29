@@ -379,3 +379,482 @@ def conversion_trend(db: Client) -> list[Row]:
     return _run(
         db.table("v_conversion_trend_weekly").select("*").order("week_start")
     ).data or []
+
+
+# ---------------------------------------------------------------------------
+# AI writes (recommendations + risk assessments)
+#
+# Both tables keep history: previous rows stay, only the is_current flag moves.
+# The unique partial indexes (ai_recommendations_one_current_per_kind,
+# risk_assessments_one_current_per_candidate) require clearing the old current
+# row BEFORE inserting the new one.
+# ---------------------------------------------------------------------------
+
+def list_ai_recommendations(
+    db: Client, candidate_id: UUID | str, *, kind: str | None = None
+) -> list[Row]:
+    q = (
+        db.table("ai_recommendations")
+        .select("*")
+        .eq("candidate_id", str(candidate_id))
+        .order("created_at", desc=True)
+    )
+    if kind:
+        q = q.eq("kind", kind)
+    return _run(q).data or []
+
+
+def get_current_ai_recommendation(
+    db: Client, candidate_id: UUID | str, kind: str
+) -> Row | None:
+    res = _run(
+        db.table("ai_recommendations")
+        .select("*")
+        .eq("candidate_id", str(candidate_id))
+        .eq("kind", kind)
+        .eq("is_current", True)
+        .limit(1)
+    )
+    return res.data[0] if res.data else None
+
+
+def insert_ai_recommendation(
+    db: Client,
+    *,
+    candidate_id: UUID | str,
+    kind: str,
+    payload: dict[str, Any],
+    prompt_context: dict[str, Any] | None,
+    model: str | None,
+    status: str = "suggested",
+) -> Row:
+    cid = str(candidate_id)
+    _run(
+        db.table("ai_recommendations")
+        .update({"is_current": False})
+        .eq("candidate_id", cid)
+        .eq("kind", kind)
+        .eq("is_current", True)
+    )
+    res = _run(
+        db.table("ai_recommendations").insert(
+            {
+                "candidate_id": cid,
+                "kind": kind,
+                "payload": payload,
+                "prompt_context": prompt_context,
+                "model": model,
+                "status": status,
+                "is_current": True,
+            }
+        )
+    )
+    if not res.data:
+        raise UpstreamError("Failed to persist the AI recommendation.")
+    return res.data[0]
+
+
+def insert_risk_assessment(
+    db: Client,
+    *,
+    candidate_id: UUID | str,
+    level: str,
+    score: int,
+    factors: list[str],
+    summary: str,
+    model: str | None,
+    source: str = "ai",
+) -> Row:
+    cid = str(candidate_id)
+    _run(
+        db.table("risk_assessments")
+        .update({"is_current": False})
+        .eq("candidate_id", cid)
+        .eq("is_current", True)
+    )
+    res = _run(
+        db.table("risk_assessments").insert(
+            {
+                "candidate_id": cid,
+                "level": level,
+                "score": score,
+                "factors": factors,
+                "summary": summary,
+                "source": source,
+                "model": model,
+                "is_current": True,
+            }
+        )
+    )
+    if not res.data:
+        raise UpstreamError("Failed to persist the risk assessment.")
+    new_row = res.data[0]
+
+    # Keep the denormalized fields on candidates in sync so v_candidate_list,
+    # the dashboard and the candidate list all reflect the new assessment.
+    _run(
+        db.table("candidates")
+        .update(
+            {
+                "current_risk_assessment_id": new_row["id"],
+                "risk_level": level,
+                "risk_score": score,
+            }
+        )
+        .eq("id", cid)
+    )
+    return new_row
+
+
+# ---------------------------------------------------------------------------
+# automated engagement sweep (services/engagement_rules.py)
+# ---------------------------------------------------------------------------
+
+def list_automation_eligible_candidates(
+    db: Client,
+    *,
+    joining_within_days: int,
+    stale_after_days: int,
+    today: date | None = None,
+    limit: int = 25,
+) -> list[Row]:
+    """v_candidate_list rows matching the pre-joining no-interaction rule:
+
+        status not in ('joined', 'declined')
+        AND today <= joining_date <= today + joining_within_days
+        AND (last_interaction_at IS NULL
+             OR last_interaction_at < now() - stale_after_days days)
+    """
+    from datetime import datetime, timedelta, timezone
+
+    today = today or date.today()
+    window_end = (today + timedelta(days=joining_within_days)).isoformat()
+    stale_cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=stale_after_days)
+    ).isoformat()
+
+    res = _run(
+        db.table(_CANDIDATE_LIST_VIEW)
+        .select("*")
+        .not_.in_("status", ["joined", "declined"])
+        .gte("joining_date", today.isoformat())
+        .lte("joining_date", window_end)
+        .or_(
+            f"last_interaction_at.is.null,last_interaction_at.lt.{stale_cutoff}"
+        )
+        .order("joining_date")
+        .limit(limit)
+    )
+    return res.data or []
+
+
+def count_candidates(db: Client) -> int:
+    return _count(db, "candidates")
+
+
+def has_open_automation_task(db: Client, candidate_id: UUID | str) -> bool:
+    res = _run(
+        db.table("tasks")
+        .select("id", count="exact")
+        .eq("candidate_id", str(candidate_id))
+        .eq("source", "automation")
+        .in_("status", ["open", "in_progress"])
+        .limit(1)
+    )
+    return (res.count or 0) > 0
+
+
+def recent_automation_event_exists(
+    db: Client, candidate_id: UUID | str, *, rule: str, since_iso: str
+) -> bool:
+    res = _run(
+        db.table("engagement_events")
+        .select("id, metadata, occurred_at")
+        .eq("candidate_id", str(candidate_id))
+        .eq("event_type", "reminder_sent")
+        .gte("occurred_at", since_iso)
+        .order("occurred_at", desc=True)
+        .limit(10)
+    )
+    for row in res.data or []:
+        meta = row.get("metadata") or {}
+        if meta.get("automation") and meta.get("rule") == rule:
+            return True
+    return False
+
+
+def insert_task(
+    db: Client,
+    *,
+    candidate_id: UUID | str,
+    title: str,
+    detail: str | None,
+    related_stage: str | None,
+    priority: str,
+    source: str,
+    due_date: str | None,
+    assigned_recruiter_id: UUID | str | None = None,
+) -> Row:
+    res = _run(
+        db.table("tasks").insert(
+            {
+                "candidate_id": str(candidate_id),
+                "assigned_recruiter_id": str(assigned_recruiter_id)
+                if assigned_recruiter_id
+                else None,
+                "title": title,
+                "detail": detail,
+                "related_stage": related_stage,
+                "priority": priority,
+                "status": "open",
+                "source": source,
+                "due_date": due_date,
+            }
+        )
+    )
+    if not res.data:
+        raise UpstreamError("Failed to create the task.")
+    return res.data[0]
+
+
+def insert_engagement_event(
+    db: Client,
+    *,
+    candidate_id: UUID | str,
+    event_type: str,
+    stage: str | None,
+    actor: str,
+    channel: str | None,
+    title: str,
+    description: str | None,
+    occurred_at: str,
+    metadata: dict[str, Any] | None = None,
+) -> Row:
+    res = _run(
+        db.table("engagement_events").insert(
+            {
+                "candidate_id": str(candidate_id),
+                "event_type": event_type,
+                "stage": stage,
+                "actor": actor,
+                "channel": channel,
+                "title": title,
+                "description": description,
+                "occurred_at": occurred_at,
+                "metadata": metadata or {},
+            }
+        )
+    )
+    if not res.data:
+        raise UpstreamError("Failed to record the engagement event.")
+    return res.data[0]
+
+
+# ---------------------------------------------------------------------------
+# write endpoints (services/mutations.py)
+# ---------------------------------------------------------------------------
+
+def insert_note(
+    db: Client,
+    *,
+    candidate_id: UUID | str,
+    body: str,
+    is_pinned: bool = False,
+    author_recruiter_id: UUID | str | None = None,
+) -> Row:
+    res = _run(
+        db.table("candidate_notes").insert(
+            {
+                "candidate_id": str(candidate_id),
+                "body": body,
+                "is_pinned": is_pinned,
+                "author_recruiter_id": str(author_recruiter_id)
+                if author_recruiter_id
+                else None,
+            }
+        )
+    )
+    if not res.data:
+        raise UpstreamError("Failed to save the note.")
+    row = res.data[0]
+    row["author_name"] = None
+    row["author_initials"] = None
+    return row
+
+
+def update_candidate(
+    db: Client, candidate_id: UUID | str, fields: dict[str, Any]
+) -> Row:
+    """Patch a subset of candidates columns and return the refreshed list row."""
+    if fields:
+        _run(
+            db.table("candidates")
+            .update(fields)
+            .eq("id", str(candidate_id))
+        )
+    row = get_candidate_list_row(db, candidate_id)  # type: ignore[arg-type]
+    if row is None:
+        raise UpstreamError("Candidate disappeared after update.")
+    return row
+
+
+def get_journey_step(
+    db: Client, candidate_id: UUID | str, stage: str
+) -> Row | None:
+    res = _run(
+        db.table("candidate_journey_steps")
+        .select("*")
+        .eq("candidate_id", str(candidate_id))
+        .eq("stage", stage)
+        .limit(1)
+    )
+    return res.data[0] if res.data else None
+
+
+def upsert_journey_step(
+    db: Client,
+    *,
+    candidate_id: UUID | str,
+    stage: str,
+    position: int,
+    status: str,
+    started_at: str | None,
+    completed_at: str | None,
+) -> Row:
+    cid = str(candidate_id)
+    existing = get_journey_step(db, cid, stage)
+    values = {
+        "status": status,
+        "started_at": started_at,
+        "completed_at": completed_at,
+    }
+    if existing:
+        res = _run(
+            db.table("candidate_journey_steps")
+            .update(values)
+            .eq("id", existing["id"])
+        )
+    else:
+        res = _run(
+            db.table("candidate_journey_steps").insert(
+                {
+                    "candidate_id": cid,
+                    "stage": stage,
+                    "position": position,
+                    **values,
+                }
+            )
+        )
+    if not res.data:
+        raise UpstreamError("Failed to update the journey step.")
+    return res.data[0]
+
+
+def get_or_create_conversation(
+    db: Client, *, candidate_id: UUID | str, channel: str, subject: str
+) -> Row:
+    cid = str(candidate_id)
+    res = _run(
+        db.table("conversations")
+        .select("*")
+        .eq("candidate_id", cid)
+        .eq("channel", channel)
+        .limit(1)
+    )
+    if res.data:
+        return res.data[0]
+    created = _run(
+        db.table("conversations").insert(
+            {"candidate_id": cid, "channel": channel, "subject": subject}
+        )
+    )
+    if not created.data:
+        raise UpstreamError("Failed to open a conversation.")
+    return created.data[0]
+
+
+def insert_message(
+    db: Client,
+    *,
+    conversation_id: UUID | str,
+    candidate_id: UUID | str,
+    channel: str,
+    body: str,
+    subject: str | None,
+    is_internal_note: bool,
+    is_ai_generated: bool,
+    sent_at: str,
+    sender_name: str = "HR",
+) -> Row:
+    res = _run(
+        db.table("messages").insert(
+            {
+                "conversation_id": str(conversation_id),
+                "candidate_id": str(candidate_id),
+                "direction": "outbound",
+                "channel": channel,
+                "actor": "recruiter",
+                "sender_name": sender_name,
+                "subject": subject,
+                "body": body,
+                "status": "sent",
+                "is_ai_generated": is_ai_generated,
+                "is_internal_note": is_internal_note,
+                "sent_at": sent_at,
+            }
+        )
+    )
+    if not res.data:
+        raise UpstreamError("Failed to send the message.")
+    return res.data[0]
+
+
+def touch_conversation(
+    db: Client, conversation_id: UUID | str, *, preview: str, at: str
+) -> None:
+    _run(
+        db.table("conversations")
+        .update({"last_message_at": at, "last_message_preview": preview[:180]})
+        .eq("id", str(conversation_id))
+    )
+
+
+def get_ai_recommendation(db: Client, recommendation_id: UUID | str) -> Row | None:
+    res = _run(
+        db.table("ai_recommendations")
+        .select("*")
+        .eq("id", str(recommendation_id))
+        .limit(1)
+    )
+    return res.data[0] if res.data else None
+
+
+def update_ai_recommendation(
+    db: Client,
+    recommendation_id: UUID | str,
+    *,
+    status: str,
+    hr_override_text: str | None,
+    resolved_at: str,
+) -> Row:
+    values: dict[str, Any] = {"status": status, "resolved_at": resolved_at}
+    if hr_override_text is not None:
+        values["hr_override_text"] = hr_override_text
+    res = _run(
+        db.table("ai_recommendations")
+        .update(values)
+        .eq("id", str(recommendation_id))
+    )
+    if not res.data:
+        raise UpstreamError("Failed to update the recommendation.")
+    return res.data[0]
+
+
+def get_risk_assessment(db: Client, assessment_id: UUID | str) -> Row | None:
+    res = _run(
+        db.table("risk_assessments")
+        .select("*")
+        .eq("id", str(assessment_id))
+        .limit(1)
+    )
+    return res.data[0] if res.data else None

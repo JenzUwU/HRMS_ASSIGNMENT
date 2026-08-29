@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeftIcon,
   CheckCircleIcon,
@@ -14,6 +15,8 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { useCountUp } from "@/lib/use-count-up";
 import { toast } from "@/lib/toast";
+import { mutationErrorMessage } from "@/lib/ai-error";
+import { updateJourneyStep, type JourneyStepStatus } from "@/lib/api";
 import { exportJourneyPdf } from "@/lib/export-journey";
 import { cn } from "@/lib/cn";
 import { RiskGauge } from "@/components/charts/RiskGauge";
@@ -74,7 +77,7 @@ const DOC_TONE: Record<string, "teal" | "amber" | "coral" | "neutral"> = {
 
 export function JourneyView({
   candidate,
-  engagement,
+  engagement: initialEngagement,
   communications,
   tasks,
   notes,
@@ -87,7 +90,25 @@ export function JourneyView({
   notes: CandidateNote[];
   documents: CandidateDocument[];
 }) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("Journey Timeline");
+  const [engagement, setEngagement] = useState(initialEngagement);
+  const [savingStage, setSavingStage] = useState<string | null>(null);
+
+  async function setStepStatus(stage: string, status: JourneyStepStatus) {
+    if (savingStage) return;
+    setSavingStage(stage);
+    try {
+      const fresh = await updateJourneyStep(candidate.slug, stage, status);
+      setEngagement(fresh);
+      toast("Journey step updated", "success");
+      router.refresh();
+    } catch (e) {
+      toast(mutationErrorMessage(e, "Could not update the step."), "error");
+    } finally {
+      setSavingStage(null);
+    }
+  }
 
   const steps = engagement.steps.map((s) => ({
     label: s.label,
@@ -175,7 +196,7 @@ export function JourneyView({
             });
             toast(
               ok
-                ? "Journey ready — save it as PDF from the print dialog"
+                ? "Journey ready: save it as PDF from the print dialog"
                 : "Allow pop-ups to export the journey",
               ok ? "success" : "error",
             );
@@ -260,10 +281,10 @@ export function JourneyView({
                 dot
                 title={
                   riskLevelRaw === "high"
-                    ? "High risk — reach out now to avoid drop-off"
+                    ? "High risk: reach out now to avoid drop-off"
                     : riskLevelRaw === "medium"
-                      ? "Medium risk — keep engagement steady"
-                      : "Low risk — engagement looks healthy"
+                      ? "Medium risk: keep engagement steady"
+                      : "Low risk: engagement looks healthy"
                 }
                 className={cn(
                   "cursor-help transition-shadow duration-200",
@@ -288,6 +309,39 @@ export function JourneyView({
 
       <Card className="mb-4">
         <JourneyStepper steps={steps} />
+        <div className="mt-5 border-t border-border pt-4">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+            Update Journey Progress
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {engagement.steps.map((s) => (
+              <div
+                key={s.stage}
+                className="flex items-center gap-2 rounded-xl border border-border px-3 py-2"
+              >
+                <span className="text-sm font-medium text-charcoal">
+                  {s.label}
+                </span>
+                <select
+                  value={s.status}
+                  disabled={savingStage === s.stage}
+                  onChange={(e) =>
+                    setStepStatus(
+                      s.stage,
+                      e.target.value as JourneyStepStatus,
+                    )
+                  }
+                  className="rounded-lg border border-border bg-white/70 px-2 py-1 text-xs font-semibold text-charcoal outline-none focus:border-orange disabled:opacity-50"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="completed">Completed</option>
+                  <option value="skipped">Skipped</option>
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-3">

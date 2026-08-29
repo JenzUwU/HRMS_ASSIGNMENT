@@ -26,9 +26,18 @@ from app.schemas.candidate import (
     CandidateTask,
 )
 from app.schemas.common import Paginated
-from app.schemas.communication import CandidateCommunications
+from app.schemas.communication import CandidateCommunications, Message
 from app.schemas.engagement import EngagementJourney
+from app.schemas.mutations import (
+    CreateMessageRequest,
+    CreateNoteRequest,
+    CreateTaskRequest,
+    RiskRecord,
+    UpdateCandidateRequest,
+    UpdateJourneyStepRequest,
+)
 from app.services import candidates as service
+from app.services import mutations as write_service
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -88,6 +97,16 @@ def get_candidate_tasks(candidate: CandidateRow, db: DB) -> list[CandidateTask]:
     return [CandidateTask.model_validate(t) for t in repo.list_tasks(db, candidate["id"])]
 
 
+@router.get("/{candidate_id}/risk/history", response_model=list[RiskRecord])
+def get_candidate_risk_history(
+    candidate: CandidateRow, db: DB
+) -> list[RiskRecord]:
+    return [
+        RiskRecord.model_validate(r)
+        for r in repo.list_risk_assessments(db, candidate["id"])
+    ]
+
+
 @router.get("/{candidate_id}/documents", response_model=list[CandidateDocument])
 def get_candidate_documents(candidate: CandidateRow, db: DB) -> list[CandidateDocument]:
     return [
@@ -99,3 +118,45 @@ def get_candidate_documents(candidate: CandidateRow, db: DB) -> list[CandidateDo
 @router.get("/{candidate_id}/notes", response_model=list[CandidateNote])
 def get_candidate_notes(candidate: CandidateRow, db: DB) -> list[CandidateNote]:
     return [CandidateNote.model_validate(n) for n in repo.list_notes(db, candidate["id"])]
+
+
+# --- write endpoints ---------------------------------------------------------
+
+
+@router.patch("/{candidate_id}", response_model=CandidateDetail)
+def patch_candidate(
+    candidate: CandidateRow, db: DB, body: UpdateCandidateRequest
+) -> CandidateDetail:
+    return write_service.update_candidate(db, candidate, body)
+
+
+@router.post("/{candidate_id}/notes", response_model=CandidateNote, status_code=201)
+def create_candidate_note(
+    candidate: CandidateRow, db: DB, body: CreateNoteRequest
+) -> CandidateNote:
+    return write_service.create_note(db, candidate, body)
+
+
+@router.post("/{candidate_id}/tasks", response_model=CandidateTask, status_code=201)
+def create_candidate_task(
+    candidate: CandidateRow, db: DB, body: CreateTaskRequest
+) -> CandidateTask:
+    return write_service.create_task(db, candidate, body)
+
+
+@router.post(
+    "/{candidate_id}/messages", response_model=Message, status_code=201
+)
+def create_candidate_message(
+    candidate: CandidateRow, db: DB, body: CreateMessageRequest
+) -> Message:
+    return write_service.create_message(db, candidate, body)
+
+
+@router.patch(
+    "/{candidate_id}/journey/{stage}", response_model=EngagementJourney
+)
+def patch_journey_step(
+    candidate: CandidateRow, db: DB, stage: str, body: UpdateJourneyStepRequest
+) -> EngagementJourney:
+    return write_service.update_journey_step(db, candidate, stage, body)

@@ -3,7 +3,7 @@
  *
  * The stack is pure frontend (no PDF library, no backend), so this renders a
  * print-optimised HTML document for that ONE candidate in a new window and
- * triggers the browser's print dialog — where the user picks "Save as PDF".
+ * triggers the browser's print dialog, where the user picks "Save as PDF".
  * Nothing from other candidates is included.
  */
 
@@ -65,7 +65,7 @@ export function exportJourneyPdf(d: JourneyExportData) {
   const stages = d.stages
     .map(
       (s) =>
-        `<li><strong>${esc(s.label)}</strong> — ${esc(s.status)}${
+        `<li><strong>${esc(s.label)}</strong>, ${esc(s.status)}${
           s.date ? ` · ${esc(s.date)}` : ""
         }</li>`,
     )
@@ -76,7 +76,7 @@ export function exportJourneyPdf(d: JourneyExportData) {
       (e) =>
         `<li><span class="muted">${esc(e.when)}</span> · <strong>${esc(
           e.title,
-        )}</strong>${e.detail ? ` — ${esc(e.detail)}` : ""} <em>(${esc(
+        )}</strong>${e.detail ? `: ${esc(e.detail)}` : ""} <em>(${esc(
           e.actor,
         )})</em></li>`,
     )
@@ -87,14 +87,14 @@ export function exportJourneyPdf(d: JourneyExportData) {
       (c) =>
         `<li><span class="muted">${esc(c.when)}</span> · ${esc(
           c.channel,
-        )} — ${esc(c.subject)}</li>`,
+        )}: ${esc(c.subject)}</li>`,
     )
     .join("");
 
   const tasks = d.tasks
     .map(
       (t) =>
-        `<li><strong>${esc(t.title)}</strong> — ${esc(t.status)}${
+        `<li><strong>${esc(t.title)}</strong>, ${esc(t.status)}${
           t.due ? ` · due ${esc(t.due)}` : ""
         }</li>`,
     )
@@ -110,11 +110,11 @@ export function exportJourneyPdf(d: JourneyExportData) {
     .join("");
 
   const docs = d.documents
-    .map((x) => `<li>${esc(x.name)} — ${esc(x.status)}</li>`)
+    .map((x) => `<li>${esc(x.name)}, ${esc(x.status)}</li>`)
     .join("");
 
   win.document.write(`<!doctype html><html><head><meta charset="utf-8">
-<title>${esc(d.candidateName)} — Engagement Journey</title>
+<title>${esc(d.candidateName)}, Engagement Journey</title>
 <style>
   * { box-sizing: border-box; }
   body { font: 13px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; color: #2b2520; margin: 40px; }

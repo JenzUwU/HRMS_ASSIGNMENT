@@ -360,3 +360,284 @@ export function getRecruiterConversion() {
 export function getConversionTrend() {
   return apiFetch<ConversionTrendPoint[]>("/analytics/conversion-trend");
 }
+
+// ---------------------------------------------------------------------------
+// mutations (write endpoints) — all go through apiFetch / ApiError
+// ---------------------------------------------------------------------------
+
+function cid(id: string) {
+  return encodeURIComponent(id);
+}
+
+export type AiChannel = "email" | "whatsapp" | "sms";
+export type CandidateStatus =
+  | "offer_accepted"
+  | "active"
+  | "joined"
+  | "declined";
+export type JourneyStepStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "skipped";
+
+export interface CreateNoteBody {
+  body: string;
+  is_pinned?: boolean;
+}
+
+export function createCandidateNote(id: string, body: CreateNoteBody) {
+  return apiFetch<CandidateNote>(`/candidates/${cid(id)}/notes`, {
+    method: "POST",
+    body,
+  });
+}
+
+export interface UpdateCandidateBody {
+  status?: CandidateStatus;
+  preferred_channel?: AiChannel;
+}
+
+export function updateCandidate(id: string, body: UpdateCandidateBody) {
+  return apiFetch<CandidateDetail>(`/candidates/${cid(id)}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export interface CreateMessageBody {
+  channel: AiChannel;
+  body: string;
+  subject?: string | null;
+  is_internal_note?: boolean;
+  is_ai_generated?: boolean;
+}
+
+export function createCandidateMessage(id: string, body: CreateMessageBody) {
+  return apiFetch<Message>(`/candidates/${cid(id)}/messages`, {
+    method: "POST",
+    body,
+  });
+}
+
+export interface CreateTaskBody {
+  title: string;
+  detail?: string | null;
+  priority?: "low" | "medium" | "high";
+  related_stage?: string | null;
+  due_date?: string | null;
+}
+
+export function createCandidateTask(id: string, body: CreateTaskBody) {
+  return apiFetch<CandidateTask>(`/candidates/${cid(id)}/tasks`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function updateJourneyStep(
+  id: string,
+  stage: string,
+  status: JourneyStepStatus,
+) {
+  return apiFetch<EngagementJourney>(
+    `/candidates/${cid(id)}/journey/${encodeURIComponent(stage)}`,
+    { method: "PATCH", body: { status } },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AI (Groq-backed) — generate + history + HR override
+// ---------------------------------------------------------------------------
+
+export interface AiMeta {
+  model: string;
+  persisted: boolean;
+  record_id: string | null;
+  corrections: string[];
+}
+
+export interface PersonalizedMessage {
+  channel: AiChannel;
+  subject: string | null;
+  body: string;
+  personalization_rationale: string | null;
+}
+
+export interface InteractionSummary {
+  summary: string;
+  key_concerns: string[];
+  positive_signals: string[];
+  unanswered_issues: string[];
+}
+
+export interface NextBestAction {
+  action: string;
+  rationale: string;
+  suggested_channel: AiChannel;
+  confidence: number;
+}
+
+export interface RiskClassification {
+  level: "low" | "medium" | "high";
+  score: number;
+  factors: string[];
+  summary: string;
+  recommended_action: string;
+}
+
+export interface AiResult<T> {
+  result: T;
+  meta: AiMeta;
+}
+
+export interface AIRecommendationRecord {
+  id: string;
+  candidate_id: string;
+  kind: string;
+  status: string;
+  model: string | null;
+  payload: Record<string, unknown>;
+  prompt_context: Record<string, unknown> | null;
+  hr_override_text: string | null;
+  is_current: boolean;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export interface RiskRecord {
+  id: string;
+  candidate_id: string;
+  level: "low" | "medium" | "high";
+  score: number;
+  factors: string[];
+  summary: string | null;
+  source: string;
+  model: string | null;
+  is_current: boolean;
+  created_at: string;
+}
+
+export function aiDraftMessage(
+  id: string,
+  body: { channel: AiChannel; purpose?: string | null },
+) {
+  return apiFetch<AiResult<PersonalizedMessage>>(
+    `/candidates/${cid(id)}/ai/message`,
+    { method: "POST", body },
+  );
+}
+
+export function aiSummary(id: string) {
+  return apiFetch<AiResult<InteractionSummary>>(
+    `/candidates/${cid(id)}/ai/summary`,
+    { method: "POST", body: {} },
+  );
+}
+
+export function aiNextAction(id: string) {
+  return apiFetch<AiResult<NextBestAction>>(
+    `/candidates/${cid(id)}/ai/next-action`,
+    { method: "POST", body: {} },
+  );
+}
+
+export function aiRisk(id: string) {
+  return apiFetch<AiResult<RiskClassification>>(
+    `/candidates/${cid(id)}/ai/risk`,
+    { method: "POST", body: {} },
+  );
+}
+
+export function getAiRecommendations(
+  id: string,
+  params: { kind?: string; current_only?: boolean } = {},
+) {
+  return apiFetch<AIRecommendationRecord[]>(
+    `/candidates/${cid(id)}/ai/recommendations`,
+    { params: { ...params } as Record<string, string | number | boolean | undefined> },
+  );
+}
+
+export function patchAiRecommendation(
+  recommendationId: string,
+  body: { action: "accept" | "dismiss" | "override"; override_text?: string | null },
+) {
+  return apiFetch<AIRecommendationRecord>(
+    `/ai-recommendations/${cid(recommendationId)}`,
+    { method: "PATCH", body },
+  );
+}
+
+export function getRiskHistory(id: string) {
+  return apiFetch<RiskRecord[]>(`/candidates/${cid(id)}/risk/history`);
+}
+
+export interface RiskOverrideResponse {
+  result: RiskRecord;
+  previous_ai_assessment: RiskRecord | null;
+  note: string;
+}
+
+export function patchRiskAssessment(
+  assessmentId: string,
+  body: { level: "low" | "medium" | "high"; reason: string; score?: number | null },
+) {
+  return apiFetch<RiskOverrideResponse>(
+    `/risk-assessments/${cid(assessmentId)}`,
+    { method: "PATCH", body },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// automation
+// ---------------------------------------------------------------------------
+
+export interface SweepCandidateResult {
+  candidate_id: string;
+  slug: string;
+  full_name: string;
+  joining_in_days: number | null;
+  days_since_interaction: number | null;
+  outcome: "processed" | "skipped" | "failed";
+  reason: string | null;
+  task_id: string | null;
+  recommendation_id: string | null;
+  event_id: string | null;
+  message_channel: string | null;
+}
+
+export interface EngagementSweepResult {
+  rule: string;
+  dry_run: boolean;
+  ran_at: string;
+  scanned: number;
+  eligible: number;
+  processed: number;
+  skipped: number;
+  failed: number;
+  results: SweepCandidateResult[];
+}
+
+export interface AutomationStatus {
+  background_loop_enabled: boolean;
+  interval_minutes: number;
+  rule: string;
+  joining_window_days: number;
+  no_interaction_days: number;
+  dedup_days: number;
+  last_run: EngagementSweepResult | null;
+}
+
+export function getAutomationStatus() {
+  return apiFetch<AutomationStatus>("/automation/status");
+}
+
+export function runEngagementSweep(
+  body: { dry_run?: boolean; limit?: number } = {},
+) {
+  return apiFetch<EngagementSweepResult>("/automation/run-engagement-sweep", {
+    method: "POST",
+    body,
+  });
+}

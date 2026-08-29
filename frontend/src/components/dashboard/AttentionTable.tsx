@@ -9,7 +9,14 @@ import { Avatar } from "@/components/ui/Avatar";
 import { RiskBadge } from "@/components/ui/Badge";
 import { CandidateActionMenu } from "@/components/dashboard/CandidateActionMenu";
 import { formatDate, relativeDays, riskLabel } from "@/lib/format";
-import type { CandidateListItem } from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { mutationErrorMessage } from "@/lib/ai-error";
+import {
+  createCandidateNote,
+  getRiskHistory,
+  patchRiskAssessment,
+  type CandidateListItem,
+} from "@/lib/api";
 
 const EMPTY = (
   <p className="py-6 text-center text-sm text-text-secondary">
@@ -20,27 +27,69 @@ const EMPTY = (
 export function AttentionTable({ items }: { items: CandidateListItem[] }) {
   const router = useRouter();
   const [rows, setRows] = useState(items);
-  // Internal HR notes — mock only, kept in local state (no backend).
-  const [notes, setNotes] = useState<Record<string, string[]>>({});
+  const [noteCounts, setNoteCounts] = useState<Record<string, number>>({});
   const [noteFor, setNoteFor] = useState<CandidateListItem | null>(null);
   const [resolveFor, setResolveFor] = useState<CandidateListItem | null>(null);
   const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dialogErr, setDialogErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Re-sync when the server component re-renders after router.refresh().
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRows(items);
+  }, [items]);
 
   if (rows.length === 0) return EMPTY;
 
-  function saveNote() {
+  async function saveNote() {
     const text = draft.trim();
-    if (!text || !noteFor) return;
-    const slug = noteFor.slug;
-    setNotes((n) => ({ ...n, [slug]: [...(n[slug] ?? []), text] }));
-    setDraft("");
-    setNoteFor(null);
+    if (!text || !noteFor || busy) return;
+    setBusy(true);
+    setDialogErr(null);
+    try {
+      await createCandidateNote(noteFor.slug, { body: text });
+      setNoteCounts((n) => ({
+        ...n,
+        [noteFor.slug]: (n[noteFor.slug] ?? 0) + 1,
+      }));
+      setDraft("");
+      setNoteFor(null);
+      toast("Note saved", "success");
+      router.refresh();
+    } catch (e) {
+      setDialogErr(mutationErrorMessage(e, "Could not save the note."));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function confirmResolve() {
-    if (!resolveFor) return;
-    setRows((r) => r.filter((x) => x.id !== resolveFor.id));
-    setResolveFor(null);
+  async function confirmResolve() {
+    if (!resolveFor || busy) return;
+    const reason = draft.trim();
+    if (!reason) {
+      setDialogErr("A short reason is required.");
+      return;
+    }
+    setBusy(true);
+    setDialogErr(null);
+    try {
+      const history = await getRiskHistory(resolveFor.slug);
+      const current = history.find((h) => h.is_current);
+      if (!current) throw new Error("no current risk assessment");
+      await patchRiskAssessment(current.id, { level: "medium", reason });
+      setRows((r) => r.filter((x) => x.id !== resolveFor.id));
+      setResolveFor(null);
+      setDraft("");
+      toast("Risk lowered to Medium and logged", "success");
+      router.refresh();
+    } catch (e) {
+      setDialogErr(
+        mutationErrorMessage(e, "Could not update the risk assessment."),
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -59,7 +108,7 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
           </thead>
           <tbody>
             {rows.map((c) => {
-              const noteCount = notes[c.slug]?.length ?? 0;
+              const noteCount = noteCounts[c.slug] ?? 0;
               return (
                 <tr
                   key={c.id}
@@ -107,9 +156,14 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
                       slug={c.slug}
                       onAddNote={() => {
                         setDraft("");
+                        setDialogErr(null);
                         setNoteFor(c);
                       }}
-                      onResolve={() => setResolveFor(c)}
+                      onResolve={() => {
+                        setDraft("");
+                        setDialogErr(null);
+                        setResolveFor(c);
+                      }}
                     />
                   </td>
                 </tr>
@@ -121,21 +175,12 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
 
       {noteFor && (
         <Dialog
-          title={`Add note — ${noteFor.full_name}`}
-          onClose={() => setNoteFor(null)}
+          title={`Add note: ${noteFor.full_name}`}
+          onClose={() => {
+            setNoteFor(null);
+            setDialogErr(null);
+          }}
         >
-          {(notes[noteFor.slug]?.length ?? 0) > 0 && (
-            <ul className="mb-3 space-y-2">
-              {notes[noteFor.slug].map((n, i) => (
-                <li
-                  key={i}
-                  className="rounded-xl bg-cream/70 px-3 py-2 text-sm text-charcoal"
-                >
-                  {n}
-                </li>
-              ))}
-            </ul>
-          )}
           <textarea
             autoFocus
             value={draft}
@@ -144,10 +189,16 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
             placeholder="Internal note visible to HR only…"
             className="w-full resize-none rounded-xl border border-border bg-white/70 px-3 py-2.5 text-sm text-charcoal outline-none placeholder:text-text-secondary focus:border-orange"
           />
+          {dialogErr && (
+            <p className="mt-2 text-sm text-coral">{dialogErr}</p>
+          )}
           <div className="mt-4 flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setNoteFor(null)}
+              onClick={() => {
+                setNoteFor(null);
+                setDialogErr(null);
+              }}
               className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-charcoal hover:bg-cream"
             >
               Cancel
@@ -155,10 +206,10 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
             <button
               type="button"
               onClick={saveNote}
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || busy}
               className="rounded-xl bg-orange px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange/90 disabled:opacity-50"
             >
-              Save Note
+              {busy ? "Saving…" : "Save Note"}
             </button>
           </div>
         </Dialog>
@@ -166,18 +217,36 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
 
       {resolveFor && (
         <Dialog
-          title="Mark as resolved?"
-          onClose={() => setResolveFor(null)}
+          title="Mark attention resolved?"
+          onClose={() => {
+            setResolveFor(null);
+            setDialogErr(null);
+          }}
         >
           <p className="text-sm text-text-secondary">
-            <strong className="text-charcoal">{resolveFor.full_name}</strong> will
-            be removed from &ldquo;Candidates Needing Attention&rdquo;. This is a
-            mock action and only affects this view.
+            This records an HR risk override for{" "}
+            <strong className="text-charcoal">{resolveFor.full_name}</strong>:
+            the engagement risk is lowered to <strong>Medium</strong> with your
+            reason, and the original AI assessment is kept in history.
           </p>
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={3}
+            placeholder="Why is this no longer high risk? (required)"
+            className="mt-3 w-full resize-none rounded-xl border border-border bg-white/70 px-3 py-2.5 text-sm text-charcoal outline-none placeholder:text-text-secondary focus:border-orange"
+          />
+          {dialogErr && (
+            <p className="mt-2 text-sm text-coral">{dialogErr}</p>
+          )}
           <div className="mt-4 flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setResolveFor(null)}
+              onClick={() => {
+                setResolveFor(null);
+                setDialogErr(null);
+              }}
               className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-charcoal hover:bg-cream"
             >
               Cancel
@@ -185,9 +254,10 @@ export function AttentionTable({ items }: { items: CandidateListItem[] }) {
             <button
               type="button"
               onClick={confirmResolve}
-              className="rounded-xl bg-coral px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-coral/90"
+              disabled={!draft.trim() || busy}
+              className="rounded-xl bg-coral px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-coral/90 disabled:opacity-50"
             >
-              Mark Resolved
+              {busy ? "Saving…" : "Lower Risk & Resolve"}
             </button>
           </div>
         </Dialog>

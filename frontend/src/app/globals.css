@@ -55,7 +55,7 @@ h6 {
 }
 
 /* ------------------------------------------------------------------ *
- * Interaction system — shared keyframes/utilities. Durations kept in
+ * Interaction system: shared keyframes/utilities. Durations kept in
  * the 150–300ms band for normal interactions; slower ones are opt-in.
  * ------------------------------------------------------------------ */
 
@@ -83,7 +83,7 @@ h6 {
   }
 }
 
-/* Risk badge: restrained "attention required" pulse — a soft halo that
+/* Risk badge: restrained "attention required" pulse: a soft halo that
    breathes, never flashes. Respects reduced-motion. */
 @keyframes riskPulse {
   0%,

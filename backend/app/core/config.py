@@ -26,9 +26,21 @@ class Settings(BaseSettings):
     supabase_secret_key: str | None = None
     supabase_publishable_key: str | None = None
 
-    # Groq (unused until integration)
+    # Groq. groq_api_key is server-side only and never sent to the browser.
     groq_api_key: str | None = None
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-20b"
+    groq_timeout_seconds: float = 30.0
+    groq_max_retries: int = 1
+
+    # Automated engagement sweep (services/engagement_rules.py).
+    # automation_enabled turns on the in-process background loop; the sweep is
+    # always available via POST /api/v1/automation/run-engagement-sweep.
+    automation_enabled: bool = False
+    automation_interval_minutes: int = 360
+    automation_joining_window_days: int = 7
+    automation_no_interaction_days: int = 5
+    automation_dedup_days: int = 3
+    automation_max_candidates_per_run: int = 25
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod

@@ -1,5 +1,5 @@
 /**
- * Dependency-free spreadsheet export. Emits SpreadsheetML 2003 (.xls) — a plain
+ * Dependency-free spreadsheet export. Emits SpreadsheetML 2003 (.xls): a plain
  * XML string Excel / Sheets / LibreOffice all open as a real workbook with typed
  * columns, unlike bare CSV. Good enough for the prototype's candidate export.
  */

@@ -17,6 +17,7 @@ import { Card } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
 import { RiskBadge } from "@/components/ui/Badge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
+import { SelectField } from "@/components/ui/SelectField";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { CandidateActionMenu } from "@/components/dashboard/CandidateActionMenu";
 import { ApiError } from "@/lib/api-client";
@@ -69,12 +70,12 @@ const COLUMNS: { key: ColKey; label: string; locked?: boolean }[] = [
 const SORTS = [
   { key: "name-asc", label: "Candidate name A–Z" },
   { key: "name-desc", label: "Candidate name Z–A" },
-  { key: "join-asc", label: "Joining date — earliest" },
-  { key: "join-desc", label: "Joining date — latest" },
+  { key: "join-asc", label: "Joining date: earliest first" },
+  { key: "join-desc", label: "Joining date: latest first" },
   { key: "risk", label: "Risk level (high first)" },
   { key: "score", label: "Engagement score" },
   { key: "interaction", label: "Last interaction" },
-  { key: "offer", label: "Offer date — newest" },
+  { key: "offer", label: "Offer date: newest first" },
 ] as const;
 type SortKey = (typeof SORTS)[number]["key"];
 
@@ -294,7 +295,7 @@ export default function CandidatesPage() {
         "success",
       );
     } catch {
-      toast("Export failed — check the API is running", "error");
+      toast("Export failed. Check the API is running", "error");
     } finally {
       setExporting(false);
     }
@@ -363,101 +364,61 @@ export default function CandidatesPage() {
 
       <Card className="mb-5">
         <div className="flex flex-wrap items-end gap-4">
-          <label className="min-w-[150px] flex-1">
-            <span className="text-xs font-semibold text-text-secondary">
-              Joining Month
-            </span>
-            <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm transition-colors hover:border-orange/40 focus-within:border-orange focus-within:ring-2 focus-within:ring-orange/15">
-              <GlassIcon name="leave" size={16} />
-              <select
-                className="w-full cursor-pointer bg-transparent outline-none"
-                value={filters.joining_month}
-                onChange={(e) => setFilter("joining_month", e.target.value)}
-              >
-                <option value="">All</option>
-                {monthOptions.map((m) => (
-                  <option key={m} value={m}>
-                    {joiningMonthLabel(m)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </label>
+          <SelectField
+            className="min-w-[150px] flex-1"
+            label="Joining Month"
+            icon={<GlassIcon name="leave" size={16} />}
+            value={filters.joining_month}
+            onChange={(v) => setFilter("joining_month", v)}
+            options={monthOptions.map((m) => ({
+              value: m,
+              label: joiningMonthLabel(m),
+            }))}
+          />
 
-          <label className="min-w-[150px] flex-1">
-            <span className="text-xs font-semibold text-text-secondary">
-              Recruiter
-            </span>
-            <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm transition-colors hover:border-orange/40 focus-within:border-orange focus-within:ring-2 focus-within:ring-orange/15">
-              <select
-                className="w-full cursor-pointer bg-transparent outline-none"
-                value={filters.recruiter_id}
-                onChange={(e) => setFilter("recruiter_id", e.target.value)}
-              >
-                <option value="">All</option>
-                {recruiters.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.full_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </label>
+          <SelectField
+            className="min-w-[150px] flex-1"
+            label="Recruiter"
+            value={filters.recruiter_id}
+            onChange={(v) => setFilter("recruiter_id", v)}
+            options={recruiters.map((r) => ({
+              value: r.id,
+              label: r.full_name,
+            }))}
+          />
 
-          <label className="min-w-[150px] flex-1">
-            <span className="text-xs font-semibold text-text-secondary">Role</span>
-            <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm transition-colors hover:border-orange/40 focus-within:border-orange focus-within:ring-2 focus-within:ring-orange/15">
-              <select
-                className="w-full cursor-pointer bg-transparent outline-none"
-                value={filters.role}
-                onChange={(e) => setFilter("role", e.target.value)}
-              >
-                <option value="">All</option>
-                {roleOptions.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </label>
+          <SelectField
+            className="min-w-[150px] flex-1"
+            label="Role"
+            value={filters.role}
+            onChange={(v) => setFilter("role", v)}
+            options={roleOptions.map((r) => ({ value: r, label: r }))}
+          />
 
-          <label className="min-w-[150px] flex-1">
-            <span className="text-xs font-semibold text-text-secondary">
-              Risk Level
-            </span>
-            <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm transition-colors hover:border-orange/40 focus-within:border-orange focus-within:ring-2 focus-within:ring-orange/15">
-              <select
-                className="w-full cursor-pointer bg-transparent outline-none"
-                value={filters.risk_level}
-                onChange={(e) => setFilter("risk_level", e.target.value)}
-              >
-                <option value="">All</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
-            </div>
-          </label>
+          <SelectField
+            className="min-w-[150px] flex-1"
+            label="Risk Level"
+            value={filters.risk_level}
+            onChange={(v) => setFilter("risk_level", v)}
+            options={[
+              { value: "high", label: "High" },
+              { value: "medium", label: "Medium" },
+              { value: "low", label: "Low" },
+            ]}
+          />
 
-          <label className="min-w-[150px] flex-1">
-            <span className="text-xs font-semibold text-text-secondary">
-              Engagement Status
-            </span>
-            <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm transition-colors hover:border-orange/40 focus-within:border-orange focus-within:ring-2 focus-within:ring-orange/15">
-              <select
-                className="w-full cursor-pointer bg-transparent outline-none"
-                value={filters.status}
-                onChange={(e) => setFilter("status", e.target.value)}
-              >
-                <option value="">All</option>
-                <option value="offer_accepted">Offer Accepted</option>
-                <option value="active">Active</option>
-                <option value="joined">Joined</option>
-                <option value="declined">Declined</option>
-              </select>
-            </div>
-          </label>
+          <SelectField
+            className="min-w-[150px] flex-1"
+            label="Engagement Status"
+            value={filters.status}
+            onChange={(v) => setFilter("status", v)}
+            options={[
+              { value: "offer_accepted", label: "Offer Accepted" },
+              { value: "active", label: "Active" },
+              { value: "joined", label: "Joined" },
+              { value: "declined", label: "Declined" },
+            ]}
+          />
 
           <button
             type="button"
@@ -775,7 +736,7 @@ export default function CandidatesPage() {
               aria-label="Previous page"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border transition-colors hover:border-orange/50 hover:bg-peach/40 active:scale-95 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent"
+              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-border transition-colors hover:border-orange/50 hover:bg-peach/40 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent"
             >
               <ChevronLeftIcon className="h-4 w-4" />
             </button>
@@ -791,7 +752,7 @@ export default function CandidatesPage() {
                   aria-current={p === page ? "page" : undefined}
                   onClick={() => setPage(p)}
                   className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-lg border text-sm font-semibold transition-all duration-150 active:scale-95",
+                    "flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border text-sm font-semibold transition-all duration-150 active:scale-95",
                     p === page
                       ? "border-orange bg-orange text-white shadow-[0_4px_12px_-4px_rgba(252,128,25,0.5)]"
                       : "border-border text-charcoal hover:border-orange/50 hover:bg-peach/40",
@@ -806,7 +767,7 @@ export default function CandidatesPage() {
               aria-label="Next page"
               disabled={page >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border transition-colors hover:border-orange/50 hover:bg-peach/40 active:scale-95 disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent"
+              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-border transition-colors hover:border-orange/50 hover:bg-peach/40 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:bg-transparent"
             >
               <ChevronRightIcon className="h-4 w-4" />
             </button>

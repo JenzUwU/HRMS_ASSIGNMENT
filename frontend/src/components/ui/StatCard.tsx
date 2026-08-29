@@ -41,7 +41,7 @@ export function StatCard({
       <HoverUnderline className="text-sm font-medium text-text-secondary">
         {label}
       </HoverUnderline>
-      <p className="font-heading text-3xl font-semibold text-charcoal transition-transform duration-200 group-hover:-translate-y-0.5">
+      <p className="font-heading text-3xl font-semibold text-charcoal transition-transform duration-200 group-hover/card:-translate-y-0.5">
         {value}
       </p>
       <div className="flex items-center gap-1.5 text-xs">

@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 
 /**
  * Global candidate search in the top bar. Loads the candidate list once
- * (existing API, page_size 100 covers the mock dataset) and matches partially
+ * (existing API, page_size 100 covers the seeded dataset) and matches partially
  * on name / email / role / recruiter. Selecting a result navigates to that
  * candidate's details page.
  */

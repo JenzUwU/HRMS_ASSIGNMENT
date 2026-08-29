@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronLeftIcon } from "@heroicons/react/24/solid";
-import { Logo } from "@/components/layout/Logo";
 import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
 import { cn } from "@/lib/cn";
 
@@ -13,6 +12,7 @@ const nav: { label: string; href: string; icon: GlassIconName }[] = [
   { label: "Engagement Journey", href: "/engagement-journey", icon: "tasks" },
   { label: "Communication", href: "/communication", icon: "messages" },
   { label: "Analytics", href: "/analytics", icon: "analytics" },
+  { label: "Automation", href: "/automation", icon: "security" },
 ];
 
 export function Sidebar() {
@@ -20,8 +20,7 @@ export function Sidebar() {
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface lg:flex">
-      <div className="flex h-16 items-center gap-3 border-b border-border px-6">
-        <Logo size={44} />
+      <div className="flex h-16 items-center border-b border-border px-6">
         <div className="leading-tight">
           <p className="text-xs font-medium text-text-secondary">
             Post Offer Engagement

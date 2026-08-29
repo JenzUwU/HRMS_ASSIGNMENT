@@ -7,6 +7,7 @@ from app.api.router import api_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging, logger
+from app.services import scheduler
 
 configure_logging()
 
@@ -15,8 +16,9 @@ configure_logging()
 async def lifespan(_: FastAPI):
     configure_logging()
     logger.info("Starting %s (%s)", settings.app_name, settings.environment)
-    # Supabase and Groq clients will be initialised here later.
+    scheduler.start()  # no-op unless AUTOMATION_ENABLED=true
     yield
+    await scheduler.stop()
     logger.info("Shutting down %s", settings.app_name)
 
 

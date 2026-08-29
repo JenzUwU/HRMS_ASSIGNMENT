@@ -7,7 +7,6 @@ import {
   EllipsisVerticalIcon,
   InformationCircleIcon,
   MapPinIcon,
-  PencilSquareIcon,
   PhoneIcon,
 } from "@heroicons/react/24/solid";
 import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
@@ -17,6 +16,9 @@ import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { RiskGauge } from "@/components/charts/RiskGauge";
 import { JourneyStepper } from "@/components/charts/JourneyStepper";
+import { CandidateAiPanel } from "@/components/candidates/CandidateAiPanel";
+import { HrNotesCard } from "@/components/candidates/HrNotesCard";
+import { RiskOverrideControl } from "@/components/candidates/RiskOverrideControl";
 import { ApiError } from "@/lib/api-client";
 import {
   getCandidate,
@@ -199,11 +201,14 @@ export default async function CandidateDetailsPage({
                 </div>
               </div>
               <div className="flex flex-col gap-2">
-                <button className="flex items-center justify-center gap-2 rounded-xl border border-orange px-4 py-2.5 text-sm font-semibold text-orange hover:bg-peach/40">
+                <Link
+                  href={`/communication?candidate=${candidate.slug}`}
+                  className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-orange px-4 py-2.5 text-sm font-semibold text-orange transition-colors hover:bg-peach/40"
+                >
                   <GlassIcon name="email" size={20} />
                   Send Message
-                </button>
-                <button className="flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-charcoal hover:bg-cream">
+                </Link>
+                <button className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-charcoal transition-colors hover:bg-cream">
                   <EllipsisVerticalIcon className="h-4 w-4" />
                   More Actions
                 </button>
@@ -231,6 +236,8 @@ export default async function CandidateDetailsPage({
               </Link>
             </div>
           </SectionCard>
+
+          <CandidateAiPanel slug={candidate.slug} />
 
           <div className="grid gap-4 md:grid-cols-2">
             <SectionCard
@@ -384,29 +391,9 @@ export default async function CandidateDetailsPage({
             </dl>
           </Card>
 
-          <Card>
-            <div className="flex items-center justify-between">
-              <h3 className="font-heading text-base font-semibold text-charcoal">
-                HR Notes
-              </h3>
-              <button className="flex items-center gap-1 text-sm font-semibold text-orange">
-                <PencilSquareIcon className="h-4 w-4" />
-                Edit
-              </button>
-            </div>
-            {note ? (
-              <div className="mt-3 rounded-xl bg-cream/70 p-4 text-sm text-text-secondary">
-                <p>{note.body}</p>
-                <p className="mt-3 text-xs font-medium text-charcoal">
-                  {note.author_name ?? "HR"}, {formatDate(note.created_at)}
-                </p>
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-text-secondary">
-                No notes for this candidate yet.
-              </p>
-            )}
-          </Card>
+          <RiskOverrideControl slug={candidate.slug} />
+
+          <HrNotesCard slug={candidate.slug} initialNote={note} />
         </div>
       </div>
     </AppShell>

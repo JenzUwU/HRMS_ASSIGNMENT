@@ -49,6 +49,27 @@ class UpstreamError(AppError):
     code = "upstream_error"
 
 
+class AINotConfiguredError(AppError):
+    """The AI provider (Groq) is not configured on the server."""
+
+    status_code = 503
+    code = "ai_not_configured"
+
+
+class AIUpstreamError(AppError):
+    """The AI provider request failed or timed out."""
+
+    status_code = 502
+    code = "ai_upstream_error"
+
+
+class AIInvalidOutputError(AppError):
+    """The AI provider returned output that failed parsing or validation."""
+
+    status_code = 502
+    code = "ai_invalid_output"
+
+
 def _payload(detail: str, code: str) -> dict[str, str]:
     return {"detail": detail, "code": code}
 

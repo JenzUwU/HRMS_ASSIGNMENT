@@ -20,11 +20,16 @@ import { Badge } from "@/components/ui/Badge";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/cn";
 import { ApiError } from "@/lib/api-client";
+import { mutationErrorMessage } from "@/lib/ai-error";
 import {
+  createCandidateMessage,
+  createCandidateTask,
   getCandidate,
   getConversationThread,
   getConversations,
   getMessageTemplates,
+  updateCandidate,
+  type AiChannel,
   type CandidateDetail,
   type Conversation,
   type ConversationThread,
@@ -63,17 +68,16 @@ export default function CommunicationPage() {
   const [candidate, setCandidate] = useState<CandidateDetail | null>(null);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
 
-  // Composer — mock only, no backend send.
   const [composerMode, setComposerMode] = useState<"message" | "note">(
     "message",
   );
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [localMessages, setLocalMessages] = useState<Record<string, Message[]>>(
-    {},
-  );
+  const [composerError, setComposerError] = useState<string | null>(null);
   const [copiedTemplate, setCopiedTemplate] = useState<string | null>(null);
   const [preferredChannel, setPreferredChannel] = useState<string | null>(null);
+  const [savingChannel, setSavingChannel] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     setListLoading(true);
@@ -176,51 +180,48 @@ export default function CommunicationPage() {
   }, [conversations, search]);
 
   const threadMessages = useMemo(() => {
-    const local = activeId ? (localMessages[activeId] ?? []) : [];
-    const all = [...(thread?.messages ?? []), ...local];
+    const all = thread?.messages ?? [];
     if (tab === "Scheduled") return all.filter((m) => m.status === "scheduled");
     if (tab === "Sent")
       return all.filter(
         (m) => m.direction === "outbound" && m.status !== "scheduled",
       );
     return all.filter((m) => m.status !== "scheduled");
-  }, [thread, tab, activeId, localMessages]);
+  }, [thread, tab]);
 
-  function sendDraft() {
+  async function sendDraft() {
     const text = draft.trim();
-    if (!text || !activeId || sending) return;
+    const conv = conversations.find((c) => c.id === activeId) ?? null;
+    if (!text || !activeId || !conv || sending) return;
     setSending(true);
-    window.setTimeout(() => {
-      const now = new Date().toISOString();
-      const msg = {
-        id: `local-${Date.now()}`,
-        conversation_id: activeId,
-        candidate_id: active?.candidate_id ?? "",
-        direction: "outbound",
-        channel: active?.channel ?? "email",
-        actor: "hr",
-        sender_name: "Admin User",
-        sender_recruiter_id: null,
-        subject: null,
+    setComposerError(null);
+    try {
+      await createCandidateMessage(conv.candidate_id, {
+        channel: (conv.channel as AiChannel) ?? "email",
         body: text,
-        status: "sent",
-        is_ai_generated: false,
         is_internal_note: composerMode === "note",
-        sent_at: now,
-        scheduled_for: null,
-        created_at: now,
-      } as unknown as Message;
-      setLocalMessages((cur) => ({
-        ...cur,
-        [activeId]: [...(cur[activeId] ?? []), msg],
-      }));
+      });
+      // Re-fetch the thread so the persisted message (and any server-side
+      // side effects) are what the UI shows.
+      const fresh = await getConversationThread(activeId);
+      setThread(fresh);
       setDraft("");
-      setSending(false);
       toast(
         composerMode === "note" ? "Internal note added" : "Message sent",
         "success",
       );
-    }, 500);
+    } catch (e) {
+      setComposerError(
+        mutationErrorMessage(
+          e,
+          composerMode === "note"
+            ? "Could not save the note."
+            : "Could not send the message.",
+        ),
+      );
+    } finally {
+      setSending(false);
+    }
   }
 
   function copyTemplate(t: MessageTemplate) {
@@ -437,7 +438,7 @@ export default function CommunicationPage() {
                       type="button"
                       onClick={() => setActiveId(c.id)}
                       className={cn(
-                        "group flex w-full gap-3 border-l-2 px-4 py-3 text-left transition-colors duration-150",
+                        "group/row flex w-full cursor-pointer gap-3 border-l-2 px-4 py-3 text-left transition-colors duration-150",
                         c.id === activeId
                           ? "border-orange bg-peach/30"
                           : "border-transparent hover:bg-peach/15",
@@ -447,7 +448,7 @@ export default function CommunicationPage() {
                         initials={c.candidate_initials ?? "?"}
                         size="md"
                         online={c.is_online}
-                        className="transition-transform duration-150 group-hover:-translate-y-px"
+                        className="transition-transform duration-150 group-hover/row:-translate-y-px"
                       />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between">
@@ -456,7 +457,7 @@ export default function CommunicationPage() {
                               "truncate text-sm font-semibold transition-colors",
                               c.id === activeId
                                 ? "text-orange"
-                                : "text-charcoal group-hover:text-orange",
+                                : "text-charcoal group-hover/row:text-orange",
                             )}
                           >
                             {c.candidate_name ?? "Unknown"}
@@ -621,6 +622,11 @@ export default function CommunicationPage() {
                       }
                       className="w-full bg-transparent text-sm text-charcoal outline-none placeholder:text-text-secondary"
                     />
+                    {composerError && (
+                      <p className="mt-2 text-xs font-medium text-coral">
+                        {composerError}
+                      </p>
+                    )}
                     <div className="mt-3 flex items-center justify-between text-text-secondary">
                       <div className="flex items-center gap-1">
                         <button
@@ -787,11 +793,34 @@ export default function CommunicationPage() {
                     <li key={ch.key}>
                       <button
                         type="button"
-                        onClick={() => {
+                        disabled={savingChannel || !candidate}
+                        onClick={async () => {
+                          if (!candidate) return;
+                          const prev = preferredChannel;
                           setPreferredChannel(ch.key);
-                          toast(`Preferred channel set to ${ch.label}`, "success");
+                          setSavingChannel(true);
+                          try {
+                            await updateCandidate(candidate.slug, {
+                              preferred_channel: ch.key as AiChannel,
+                            });
+                            toast(
+                              `Preferred channel set to ${ch.label}`,
+                              "success",
+                            );
+                          } catch (e) {
+                            setPreferredChannel(prev);
+                            toast(
+                              mutationErrorMessage(
+                                e,
+                                "Could not update the preferred channel.",
+                              ),
+                              "error",
+                            );
+                          } finally {
+                            setSavingChannel(false);
+                          }
                         }}
-                        className="group flex w-full items-center gap-2 rounded-lg px-1 py-1 transition-colors hover:bg-peach/30"
+                        className="group flex w-full items-center gap-2 rounded-lg px-1 py-1 transition-colors hover:bg-peach/30 disabled:opacity-60"
                       >
                         <span
                           className={cn(
@@ -820,45 +849,74 @@ export default function CommunicationPage() {
               <h3 className="font-heading text-base font-semibold text-charcoal">
                 Quick Actions
               </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Creates a real follow-up task for this candidate.
+              </p>
               <div className="mt-3 space-y-2">
-                {[
-                  {
-                    label: "Send Document Reminder",
-                    icon: "documents" as const,
-                    done: "Document reminder queued",
-                  },
-                  {
-                    label: "Schedule Check-in",
-                    icon: "leave" as const,
-                    done: "Check-in scheduled",
-                  },
-                  {
-                    label: "Share Pre-Joining Resources",
-                    icon: "employees" as const,
-                    done: "Pre-joining resources shared",
-                  },
-                ].map((a) => (
+                {(
+                  [
+                    {
+                      label: "Send Document Reminder",
+                      icon: "documents" as const,
+                      title: "Send document reminder",
+                      detail:
+                        "Follow up with the candidate on their pending documents.",
+                      done: "Document reminder task created",
+                    },
+                    {
+                      label: "Schedule Check-in",
+                      icon: "leave" as const,
+                      title: "Schedule pre-joining check-in",
+                      detail: "Set up a check-in call before the joining date.",
+                      done: "Check-in task created",
+                    },
+                    {
+                      label: "Share Pre-Joining Resources",
+                      icon: "employees" as const,
+                      title: "Share pre-joining resources",
+                      detail:
+                        "Send onboarding resources and the first-week plan.",
+                      done: "Resource-sharing task created",
+                    },
+                  ] as const
+                ).map((a) => (
                   <button
                     key={a.label}
                     type="button"
-                    onClick={() =>
-                      toast(
-                        `${a.done}${
-                          active?.candidate_name
-                            ? ` for ${active.candidate_name}`
-                            : ""
-                        }`,
-                        "success",
-                      )
-                    }
-                    className="group flex w-full items-center gap-2 rounded-xl border border-border px-3 py-2.5 text-sm font-semibold text-charcoal transition-all duration-150 hover:-translate-y-px hover:border-orange/40 hover:bg-cream hover:text-orange active:translate-y-0"
+                    disabled={!candidate || busyAction === a.label}
+                    onClick={async () => {
+                      if (!candidate) return;
+                      setBusyAction(a.label);
+                      try {
+                        await createCandidateTask(candidate.slug, {
+                          title: a.title,
+                          detail: a.detail,
+                          priority: "medium",
+                        });
+                        toast(
+                          `${a.done} for ${candidate.full_name}`,
+                          "success",
+                        );
+                      } catch (e) {
+                        toast(
+                          mutationErrorMessage(
+                            e,
+                            "Could not create the task.",
+                          ),
+                          "error",
+                        );
+                      } finally {
+                        setBusyAction(null);
+                      }
+                    }}
+                    className="group flex w-full items-center gap-2 rounded-xl border border-border px-3 py-2.5 text-sm font-semibold text-charcoal transition-all duration-150 hover:-translate-y-px hover:border-orange/40 hover:bg-cream hover:text-orange active:translate-y-0 disabled:opacity-60"
                   >
                     <GlassIcon
                       name={a.icon}
                       size={16}
                       className="transition-transform duration-200 group-hover:-translate-y-0.5"
                     />
-                    {a.label}
+                    {busyAction === a.label ? "Creating…" : a.label}
                   </button>
                 ))}
               </div>

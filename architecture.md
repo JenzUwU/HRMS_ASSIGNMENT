@@ -1,5 +1,11 @@
 # Post-Offer Engagement HRMS Architecture
 
+> **Note:** `README.md` at the repo root is the authoritative, current description
+> of the system. This document was written during the design phase; some sections
+> (notably the frontend "mock data" and "mock-to-real migration" notes) predate
+> the real Supabase + FastAPI + Groq integration and the automated engagement
+> rule, which are now implemented. Where the two disagree, follow `README.md`.
+
 ## 1. Project Overview
 
 This project is a full-stack HR application for managing candidates between offer acceptance and joining.

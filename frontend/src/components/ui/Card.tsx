@@ -18,7 +18,7 @@ export function Card({
   return (
     <Tag
       className={cn(
-        "group rounded-xl border border-white/70 bg-white/65 p-5",
+        "group/card rounded-xl border border-white/70 bg-white/65 p-5",
         "shadow-[0_1px_2px_rgba(41,41,41,0.04),0_10px_30px_-8px_rgba(41,41,41,0.10)]",
         "ring-1 ring-black/[0.03] backdrop-blur-xl backdrop-saturate-150",
         "transition duration-200 hover:bg-white/80",
@@ -33,9 +33,9 @@ export function Card({
 
 /**
  * Text with an orange underline that wipes in from the left. The trigger is the
- * parent Card (which carries `group`), so the effect fires from anywhere inside
- * the card, and `group-active` covers tap on touch devices. The animation itself
- * is unchanged from the original text-hover version.
+ * parent Card (which carries `group/card`), so the effect fires from anywhere
+ * inside the card, and `group-active/card` covers tap on touch devices. Scoped
+ * to the card group so nested `group` rows do not also trigger it.
  */
 export function HoverUnderline({
   children,
@@ -49,10 +49,10 @@ export function HoverUnderline({
   return (
     <Tag
       className={cn(
-        "relative inline-block w-fit transition-colors duration-200 group-hover:text-orange group-active:text-orange",
+        "relative inline-block w-fit transition-colors duration-200 group-hover/card:text-orange group-active/card:text-orange",
         "after:absolute after:-bottom-[3px] after:left-0 after:h-[2px] after:w-full after:origin-left",
         "after:scale-x-0 after:rounded-full after:bg-orange after:transition-transform after:duration-300 after:ease-out",
-        "group-hover:after:scale-x-100 group-active:after:scale-x-100",
+        "group-hover/card:after:scale-x-100 group-active/card:after:scale-x-100",
         className,
       )}
     >
