@@ -1,5 +1,6 @@
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
+import { Toaster } from "@/components/ui/Toaster";
 
 export function AppShell({
   title,
@@ -17,6 +18,7 @@ export function AppShell({
         <Topbar title={title} searchPlaceholder={searchPlaceholder} />
         <main className="flex-1 px-6 py-6">{children}</main>
       </div>
+      <Toaster />
     </div>
   );
 }

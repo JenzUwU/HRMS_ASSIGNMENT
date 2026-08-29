@@ -3,20 +3,14 @@ import Link from "next/link";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
-  BriefcaseIcon,
-  BuildingOffice2Icon,
-  CalendarDaysIcon,
-  ChatBubbleLeftRightIcon,
   ChevronRightIcon,
   EllipsisVerticalIcon,
-  EnvelopeIcon,
-  IdentificationIcon,
   InformationCircleIcon,
   MapPinIcon,
   PencilSquareIcon,
   PhoneIcon,
-  UserIcon,
 } from "@heroicons/react/24/solid";
+import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card, SectionCard } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
@@ -93,18 +87,31 @@ export default async function CandidateDetailsPage({
     summary: null,
   };
 
-  const info = [
-    { label: "Recruiter", value: candidate.recruiter_name, icon: UserIcon },
-    { label: "Source", value: candidate.source, icon: IdentificationIcon },
+  const info: {
+    label: string;
+    value: string;
+    glassIcon?: GlassIconName;
+    icon?: React.ComponentType<{ className?: string }>;
+  }[] = [
+    {
+      label: "Recruiter",
+      value: candidate.recruiter_name,
+      glassIcon: "employee",
+    },
+    {
+      label: "Source",
+      value: candidate.source,
+      glassIcon: "employee-details",
+    },
     {
       label: "Department",
       value: candidate.department ?? "Not set",
-      icon: BuildingOffice2Icon,
+      glassIcon: "organization",
     },
     {
       label: "Employment Type",
       value: candidate.employment_type.replace("_", " "),
-      icon: BriefcaseIcon,
+      glassIcon: "jobs",
     },
     { label: "Location", value: candidate.location, icon: MapPinIcon },
   ];
@@ -163,7 +170,7 @@ export default async function CandidateDetailsPage({
                 </p>
                 <div className="mt-3 flex flex-wrap gap-4 text-sm text-text-secondary">
                   <span className="flex items-center gap-1.5">
-                    <EnvelopeIcon className="h-4 w-4" />
+                    <GlassIcon name="email" size={20} />
                     {candidate.email}
                   </span>
                   {candidate.phone && (
@@ -193,7 +200,7 @@ export default async function CandidateDetailsPage({
               </div>
               <div className="flex flex-col gap-2">
                 <button className="flex items-center justify-center gap-2 rounded-xl border border-orange px-4 py-2.5 text-sm font-semibold text-orange hover:bg-peach/40">
-                  <EnvelopeIcon className="h-4 w-4" />
+                  <GlassIcon name="email" size={20} />
                   Send Message
                 </button>
                 <button className="flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-charcoal hover:bg-cream">
@@ -240,13 +247,11 @@ export default async function CandidateDetailsPage({
                 <ul className="space-y-4">
                   {recentMessages.map((m) => (
                     <li key={m.id} className="flex gap-3">
-                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-peach text-orange">
-                        {m.channel === "email" ? (
-                          <EnvelopeIcon className="h-4 w-4" />
-                        ) : (
-                          <ChatBubbleLeftRightIcon className="h-4 w-4" />
-                        )}
-                      </span>
+                      <GlassIcon
+                        name={m.channel === "email" ? "email" : "messages"}
+                        size={30}
+                        className="mt-0.5"
+                      />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-charcoal">
                           {m.subject ?? m.body.slice(0, 48)}
@@ -296,7 +301,7 @@ export default async function CandidateDetailsPage({
                       </div>
                       {t.due_date && (
                         <span className="flex items-center gap-1 whitespace-nowrap text-xs text-text-secondary">
-                          <CalendarDaysIcon className="h-3.5 w-3.5" />
+                          <GlassIcon name="leave" size={14} />
                           {formatDate(t.due_date)}
                         </span>
                       )}
@@ -364,7 +369,11 @@ export default async function CandidateDetailsPage({
                   className="flex items-center justify-between gap-3"
                 >
                   <dt className="flex items-center gap-2 text-text-secondary">
-                    <row.icon className="h-4 w-4" />
+                    {row.glassIcon ? (
+                      <GlassIcon name={row.glassIcon} size={16} />
+                    ) : row.icon ? (
+                      <row.icon className="h-4 w-4" />
+                    ) : null}
                     {row.label}
                   </dt>
                   <dd className="text-right font-semibold capitalize text-charcoal">

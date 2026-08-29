@@ -3,19 +3,19 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  ArrowRightIcon,
-  ArrowUpTrayIcon,
-  CalendarDaysIcon,
-  ChatBubbleLeftRightIcon,
+  ArrowLeftIcon,
   CheckCircleIcon,
   ChevronRightIcon,
-  DocumentTextIcon,
-  EnvelopeIcon,
 } from "@heroicons/react/24/solid";
 import { AppShell } from "@/components/layout/AppShell";
+import { GlassIcon } from "@/components/ui/GlassIcon";
 import { Card, SectionCard } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
+import { useCountUp } from "@/lib/use-count-up";
+import { toast } from "@/lib/toast";
+import { exportJourneyPdf } from "@/lib/export-journey";
+import { cn } from "@/lib/cn";
 import { RiskGauge } from "@/components/charts/RiskGauge";
 import { JourneyStepper } from "@/components/charts/JourneyStepper";
 import { ProgressDonut } from "@/components/charts/ProgressDonut";
@@ -110,6 +110,7 @@ export function JourneyView({
     );
 
   const score = candidate.engagement_score ?? engagement.risk?.score ?? 0;
+  const animatedScore = useCountUp(score);
   const riskLevelRaw = engagement.risk?.level ?? candidate.risk_level;
   const riskTone =
     riskLevelRaw === "high" ? "coral" : riskLevelRaw === "medium" ? "amber" : "teal";
@@ -131,8 +132,61 @@ export function JourneyView({
           <ChevronRightIcon className="h-3.5 w-3.5 text-text-secondary" />
           <span className="font-semibold text-charcoal">Engagement Journey</span>
         </nav>
-        <button className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-charcoal hover:bg-cream">
-          <ArrowUpTrayIcon className="h-4 w-4" />
+        <button
+          type="button"
+          onClick={() => {
+            const ok = exportJourneyPdf({
+              candidateName: candidate.full_name,
+              role: candidate.role,
+              recruiter: candidate.recruiter_name,
+              riskLevel: `${riskLabel(riskLevelRaw)} Risk`,
+              engagementScore: score,
+              status: STATUS_LABEL[candidate.status] ?? candidate.status,
+              stages: steps.map((s) => ({
+                label: s.label,
+                status: s.statusLabel ?? s.status,
+                date: s.date,
+              })),
+              timeline: engagement.timeline.map((e) => ({
+                when: formatDateTime(e.occurred_at),
+                title: e.title,
+                detail: e.description ?? "",
+                actor: ACTOR_TAG[e.actor] ?? e.actor,
+              })),
+              communications: messages.map((m) => ({
+                when: formatDate(m.sent_at),
+                channel: m.channel,
+                subject: m.subject ?? m.body.slice(0, 60),
+              })),
+              tasks: tasks.map((t) => ({
+                title: t.title,
+                status: t.status,
+                due: t.due_date ? formatDate(t.due_date) : "",
+              })),
+              notes: notes.map((n) => ({
+                author: n.author_name ?? "HR",
+                when: formatDate(n.created_at),
+                body: n.body,
+              })),
+              documents: documents.map((x) => ({
+                name: DOC_TYPE_LABEL[x.doc_type] ?? x.doc_type,
+                status: DOC_STATUS_LABEL[x.status] ?? x.status,
+              })),
+            });
+            toast(
+              ok
+                ? "Journey ready — save it as PDF from the print dialog"
+                : "Allow pop-ups to export the journey",
+              ok ? "success" : "error",
+            );
+          }}
+          className="group flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-charcoal transition-all duration-200 hover:-translate-y-px hover:border-orange/40 hover:bg-cream hover:shadow-[0_8px_20px_-10px_rgba(252,128,25,0.3)] active:translate-y-0"
+        >
+          <GlassIcon
+            name="upload"
+            size={16}
+            className="transition-transform duration-200 group-hover:-translate-y-0.5"
+          />
           Export Journey
         </button>
       </div>
@@ -154,11 +208,36 @@ export function JourneyView({
                 {candidate.role}, {candidate.location_city ?? candidate.location}
               </p>
               <div className="mt-2 flex flex-wrap gap-4 text-xs text-text-secondary">
-                <span className="flex items-center gap-1">
-                  <EnvelopeIcon className="h-3.5 w-3.5" />
-                  {candidate.email}
-                </span>
-                {candidate.phone && <span>{candidate.phone}</span>}
+                <a
+                  href={`mailto:${candidate.email}`}
+                  title="Send email"
+                  className="group flex items-center gap-1 rounded-md px-1 py-0.5 transition-colors hover:bg-peach/40 hover:text-orange"
+                >
+                  <GlassIcon
+                    name="email"
+                    size={18}
+                    className="transition-transform duration-200 group-hover:-translate-y-0.5"
+                  />
+                  <span className="group-hover:underline">
+                    {candidate.email}
+                  </span>
+                </a>
+                {candidate.phone && (
+                  <button
+                    type="button"
+                    title="Copy phone number"
+                    onClick={() => {
+                      navigator.clipboard
+                        ?.writeText(candidate.phone as string)
+                        .then(() => toast("Phone number copied", "success"))
+                        .catch(() => toast("Could not copy", "error"));
+                    }}
+                    className="flex items-center gap-1 rounded-md px-1 py-0.5 transition-colors hover:bg-peach/40 hover:text-orange"
+                  >
+                    <GlassIcon name="messages" size={16} />
+                    {candidate.phone}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -176,14 +255,30 @@ export function JourneyView({
             </div>
             <div>
               <p className="text-xs text-text-secondary">Risk Level</p>
-              <Badge tone={riskTone} dot>
+              <Badge
+                tone={riskTone}
+                dot
+                title={
+                  riskLevelRaw === "high"
+                    ? "High risk — reach out now to avoid drop-off"
+                    : riskLevelRaw === "medium"
+                      ? "Medium risk — keep engagement steady"
+                      : "Low risk — engagement looks healthy"
+                }
+                className={cn(
+                  "cursor-help transition-shadow duration-200",
+                  riskLevelRaw === "high"
+                    ? "risk-pulse hover:shadow-[0_0_0_5px_rgba(232,93,74,0.18)]"
+                    : "hover:shadow-[0_0_0_4px_rgba(41,41,41,0.06)]",
+                )}
+              >
                 {riskLabel(riskLevelRaw)} Risk
               </Badge>
             </div>
             <div className="text-center">
               <p className="text-xs text-text-secondary">Engagement Score</p>
               <p className="font-heading text-2xl font-bold text-charcoal">
-                {score}/100
+                {animatedScore}/100
               </p>
               <RiskGauge score={score} />
             </div>
@@ -201,19 +296,22 @@ export function JourneyView({
             {TABS.map((t) => (
               <button
                 key={t}
+                type="button"
+                aria-current={t === tab ? "page" : undefined}
                 onClick={() => setTab(t)}
-                className={
+                className={cn(
+                  "-mb-px border-b-2 py-3 text-sm font-semibold transition-colors duration-200",
                   t === tab
-                    ? "border-b-2 border-orange py-3 text-sm font-semibold text-orange"
-                    : "border-b-2 border-transparent py-3 text-sm font-semibold text-text-secondary hover:text-charcoal"
-                }
+                    ? "border-orange text-orange"
+                    : "border-transparent text-text-secondary hover:border-orange/30 hover:text-charcoal",
+                )}
               >
                 {t}
               </button>
             ))}
           </div>
 
-          <div className="p-5">
+          <div key={tab} className="animate-fade-slide p-5">
             {tab === "Journey Timeline" && (
               <>
                 {engagement.timeline.length === 0 ? (
@@ -221,8 +319,11 @@ export function JourneyView({
                 ) : (
                   <ol className="relative space-y-6 border-l-2 border-border pl-6">
                     {engagement.timeline.map((e) => (
-                      <li key={e.id} className="relative">
-                        <span className="absolute -left-[31px] flex h-5 w-5 items-center justify-center rounded-full bg-teal text-white">
+                      <li
+                        key={e.id}
+                        className="group/ev relative -mx-2 rounded-lg px-2 py-1 transition-colors hover:bg-peach/30"
+                      >
+                        <span className="absolute -left-[31px] flex h-5 w-5 items-center justify-center rounded-full bg-teal text-white transition-transform duration-200 group-hover/ev:scale-110">
                           <CheckCircleIcon className="h-4 w-4" />
                         </span>
                         <div className="flex items-start justify-between gap-3">
@@ -258,13 +359,11 @@ export function JourneyView({
                   <ul className="space-y-4">
                     {messages.map((m) => (
                       <li key={m.id} className="flex gap-3">
-                        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-peach text-orange">
-                          {m.channel === "email" ? (
-                            <EnvelopeIcon className="h-4 w-4" />
-                          ) : (
-                            <ChatBubbleLeftRightIcon className="h-4 w-4" />
-                          )}
-                        </span>
+                        <GlassIcon
+                          name={m.channel === "email" ? "email" : "messages"}
+                          size={30}
+                          className="mt-0.5"
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-semibold text-charcoal">
                             {m.subject ?? m.body.slice(0, 60)}
@@ -308,7 +407,7 @@ export function JourneyView({
                           )}
                           {t.due_date && (
                             <p className="mt-1 flex items-center gap-1 text-xs text-text-secondary">
-                              <CalendarDaysIcon className="h-3.5 w-3.5" />
+                              <GlassIcon name="leave" size={14} />
                               Due {formatDate(t.due_date)}
                             </p>
                           )}
@@ -357,7 +456,7 @@ export function JourneyView({
                         className="flex items-center justify-between"
                       >
                         <span className="flex items-center gap-2 text-sm text-charcoal">
-                          <DocumentTextIcon className="h-4 w-4 text-text-secondary" />
+                          <GlassIcon name="documents" size={16} />
                           {DOC_TYPE_LABEL[d.doc_type] ?? d.doc_type}
                         </span>
                         <Badge tone={DOC_TONE[d.status] ?? "neutral"}>
@@ -372,10 +471,10 @@ export function JourneyView({
 
             <Link
               href={`/candidates/${candidate.slug}`}
-              className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-cream/70 py-3 text-sm font-semibold text-orange"
+              className="group mt-4 flex items-center justify-center gap-2 rounded-xl bg-cream/70 py-3 text-sm font-semibold text-orange transition-colors hover:bg-peach/60 active:bg-peach/70"
             >
+              <ArrowLeftIcon className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
               Back to Candidate Details
-              <ArrowRightIcon className="h-4 w-4" />
             </Link>
           </div>
         </Card>
@@ -403,7 +502,7 @@ export function JourneyView({
                     </div>
                     {a.due_date && (
                       <span className="flex items-center gap-1 whitespace-nowrap text-xs text-text-secondary">
-                        <CalendarDaysIcon className="h-3.5 w-3.5" />
+                        <GlassIcon name="leave" size={14} />
                         {formatDate(a.due_date)}
                       </span>
                     )}
@@ -428,7 +527,7 @@ export function JourneyView({
                     className="flex items-center justify-between"
                   >
                     <span className="flex items-center gap-2 text-sm text-charcoal">
-                      <DocumentTextIcon className="h-4 w-4 text-text-secondary" />
+                      <GlassIcon name="documents" size={16} />
                       {DOC_TYPE_LABEL[d.doc_type] ?? d.doc_type}
                     </span>
                     <Badge tone={DOC_TONE[d.status] ?? "neutral"}>
@@ -477,26 +576,46 @@ export function JourneyView({
             <h3 className="font-heading text-base font-semibold text-charcoal">
               Journey Progress
             </h3>
-            <div className="mt-3 flex items-center gap-5">
-              <ProgressDonut percent={engagement.progress.percent_complete} />
-              <ul className="space-y-2 text-sm">
-                <li className="flex items-center gap-2 text-text-secondary">
-                  <span className="h-2.5 w-2.5 rounded-full bg-teal" /> Completed{" "}
-                  {engagement.progress.completed}
-                </li>
-                <li className="flex items-center gap-2 text-text-secondary">
-                  <span className="h-2.5 w-2.5 rounded-full bg-orange" /> In Progress{" "}
-                  {engagement.progress.in_progress}
-                </li>
-                <li className="flex items-center gap-2 text-text-secondary">
-                  <span className="h-2.5 w-2.5 rounded-full bg-border" /> Pending{" "}
-                  {engagement.progress.pending}
-                </li>
-              </ul>
+            <div className="mt-4 flex items-center gap-5">
+              <ProgressDonut
+                percent={engagement.progress.percent_complete}
+                label="Complete"
+              />
+              <dl className="grid flex-1 grid-cols-2 gap-x-3 gap-y-3">
+                {[
+                  {
+                    dot: "bg-teal",
+                    label: "Completed",
+                    value: engagement.progress.completed,
+                  },
+                  {
+                    dot: "bg-orange",
+                    label: "In Progress",
+                    value: engagement.progress.in_progress,
+                  },
+                  {
+                    dot: "bg-border",
+                    label: "Pending",
+                    value: engagement.progress.pending,
+                  },
+                  {
+                    dot: "bg-charcoal/30",
+                    label: "Total Steps",
+                    value: engagement.progress.total_steps,
+                  },
+                ].map((s) => (
+                  <div key={s.label}>
+                    <dd className="font-heading text-lg font-bold text-charcoal">
+                      {s.value}
+                    </dd>
+                    <dt className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+                      <span className={cn("h-2 w-2 rounded-full", s.dot)} />
+                      {s.label}
+                    </dt>
+                  </div>
+                ))}
+              </dl>
             </div>
-            <p className="mt-3 text-xs text-text-secondary">
-              Total Steps {engagement.progress.total_steps}
-            </p>
           </Card>
         </div>
       </div>

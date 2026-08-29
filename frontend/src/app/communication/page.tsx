@@ -3,26 +3,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowUturnLeftIcon,
   BookmarkIcon,
-  CalendarDaysIcon,
   CheckCircleIcon,
   ChevronRightIcon,
-  ClockIcon,
-  DocumentTextIcon,
-  EnvelopeIcon,
   ExclamationTriangleIcon,
   FaceSmileIcon,
-  FunnelIcon,
   PaperAirplaneIcon,
   PaperClipIcon,
   PlusIcon,
-  UserGroupIcon,
 } from "@heroicons/react/24/solid";
 import { AppShell } from "@/components/layout/AppShell";
+import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
 import { Card } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
+import { toast } from "@/lib/toast";
+import { cn } from "@/lib/cn";
 import { ApiError } from "@/lib/api-client";
 import {
   getCandidate,
@@ -67,6 +63,18 @@ export default function CommunicationPage() {
   const [candidate, setCandidate] = useState<CandidateDetail | null>(null);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
 
+  // Composer — mock only, no backend send.
+  const [composerMode, setComposerMode] = useState<"message" | "note">(
+    "message",
+  );
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [localMessages, setLocalMessages] = useState<Record<string, Message[]>>(
+    {},
+  );
+  const [copiedTemplate, setCopiedTemplate] = useState<string | null>(null);
+  const [preferredChannel, setPreferredChannel] = useState<string | null>(null);
+
   const loadList = useCallback(async () => {
     setListLoading(true);
     setListError(null);
@@ -74,7 +82,16 @@ export default function CommunicationPage() {
       const res = await getConversations(1, 50);
       setConversations(res.items);
       setTotal(res.total);
-      setActiveId((cur) => cur ?? res.items[0]?.id ?? null);
+      // Deep link: /communication?c=<conversationId> opens that thread directly.
+      const wanted =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("c")
+          : null;
+      const preselect =
+        wanted && res.items.some((i) => i.id === wanted)
+          ? wanted
+          : (res.items[0]?.id ?? null);
+      setActiveId((cur) => cur ?? preselect);
     } catch (e) {
       setConversations([]);
       setListError(
@@ -97,6 +114,27 @@ export default function CommunicationPage() {
       .then(setTemplates)
       .catch(() => setTemplates([]));
   }, []);
+
+  // Deep link support: /communication?candidate=<slug> preselects that
+  // candidate's conversation once the list has loaded (dashboard row action).
+  const [wantCandidate, setWantCandidate] = useState<string | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWantCandidate(
+      new URLSearchParams(window.location.search).get("candidate"),
+    );
+  }, []);
+  useEffect(() => {
+    if (!wantCandidate || conversations.length === 0) return;
+    const match = conversations.find(
+      (c) => c.candidate_slug === wantCandidate,
+    );
+    if (match) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveId(match.id);
+      setWantCandidate(null);
+    }
+  }, [wantCandidate, conversations]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -138,14 +176,63 @@ export default function CommunicationPage() {
   }, [conversations, search]);
 
   const threadMessages = useMemo(() => {
-    const all = thread?.messages ?? [];
+    const local = activeId ? (localMessages[activeId] ?? []) : [];
+    const all = [...(thread?.messages ?? []), ...local];
     if (tab === "Scheduled") return all.filter((m) => m.status === "scheduled");
     if (tab === "Sent")
       return all.filter(
         (m) => m.direction === "outbound" && m.status !== "scheduled",
       );
     return all.filter((m) => m.status !== "scheduled");
-  }, [thread, tab]);
+  }, [thread, tab, activeId, localMessages]);
+
+  function sendDraft() {
+    const text = draft.trim();
+    if (!text || !activeId || sending) return;
+    setSending(true);
+    window.setTimeout(() => {
+      const now = new Date().toISOString();
+      const msg = {
+        id: `local-${Date.now()}`,
+        conversation_id: activeId,
+        candidate_id: active?.candidate_id ?? "",
+        direction: "outbound",
+        channel: active?.channel ?? "email",
+        actor: "hr",
+        sender_name: "Admin User",
+        sender_recruiter_id: null,
+        subject: null,
+        body: text,
+        status: "sent",
+        is_ai_generated: false,
+        is_internal_note: composerMode === "note",
+        sent_at: now,
+        scheduled_for: null,
+        created_at: now,
+      } as unknown as Message;
+      setLocalMessages((cur) => ({
+        ...cur,
+        [activeId]: [...(cur[activeId] ?? []), msg],
+      }));
+      setDraft("");
+      setSending(false);
+      toast(
+        composerMode === "note" ? "Internal note added" : "Message sent",
+        "success",
+      );
+    }, 500);
+  }
+
+  function copyTemplate(t: MessageTemplate) {
+    navigator.clipboard
+      ?.writeText(t.body)
+      .then(() => {
+        setCopiedTemplate(t.id);
+        toast("Template copied", "success");
+        window.setTimeout(() => setCopiedTemplate(null), 1800);
+      })
+      .catch(() => toast("Could not copy", "error"));
+  }
 
   const overview = useMemo(() => {
     const msgs = (thread?.messages ?? []).filter((m) => m.status !== "scheduled");
@@ -182,9 +269,17 @@ export default function CommunicationPage() {
     const responseRate = sent ? Math.min(100, Math.round((replies / sent) * 100)) : 0;
 
     return [
-      { label: "Messages Sent", value: String(sent), icon: EnvelopeIcon },
-      { label: "Replies Received", value: String(replies), icon: ArrowUturnLeftIcon },
-      { label: "Avg. Response Time", value: avgLabel, icon: ClockIcon },
+      { label: "Messages Sent", value: String(sent), glassIcon: "email" as const },
+      {
+        label: "Replies Received",
+        value: String(replies),
+        glassIcon: "messages" as const,
+      },
+      {
+        label: "Avg. Response Time",
+        value: avgLabel,
+        glassIcon: "attendance" as const,
+      },
       { responseRate },
     ] as const;
   }, [thread]);
@@ -211,13 +306,22 @@ export default function CommunicationPage() {
         </nav>
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={() => setTab("Templates")}
-            className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-charcoal hover:bg-cream"
+            className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-charcoal transition-all duration-150 hover:-translate-y-px hover:border-orange/40 hover:bg-cream active:translate-y-0"
           >
-            <DocumentTextIcon className="h-4 w-4" />
+            <GlassIcon name="documents" size={16} />
             Message Templates
           </button>
-          <button className="flex items-center gap-2 rounded-xl bg-orange px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange/90">
+          <button
+            type="button"
+            onClick={() => {
+              setTab("Inbox");
+              setComposerMode("message");
+              toast("Pick a conversation, then type below to send");
+            }}
+            className="flex items-center gap-2 rounded-xl bg-orange px-4 py-2.5 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-px hover:bg-orange/90 active:translate-y-0"
+          >
             <PlusIcon className="h-4 w-4" />
             New Message
           </button>
@@ -228,12 +332,15 @@ export default function CommunicationPage() {
         {TABS.map((t) => (
           <button
             key={t}
+            type="button"
+            aria-current={t === tab ? "page" : undefined}
             onClick={() => setTab(t)}
-            className={
+            className={cn(
+              "-mb-px border-b-2 pb-3 text-sm font-semibold transition-colors duration-200",
               t === tab
-                ? "border-b-2 border-orange pb-3 text-sm font-semibold text-orange"
-                : "border-b-2 border-transparent pb-3 text-sm font-semibold text-text-secondary hover:text-charcoal"
-            }
+                ? "border-orange text-orange"
+                : "border-transparent text-text-secondary hover:border-orange/30 hover:text-charcoal",
+            )}
           >
             {t}
           </button>
@@ -252,18 +359,47 @@ export default function CommunicationPage() {
             {templates.map((t) => (
               <div
                 key={t.id}
-                className="rounded-xl border border-border p-4"
+                className="group flex flex-col rounded-xl border border-border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-orange/40 hover:shadow-[0_10px_24px_-12px_rgba(41,41,41,0.18)]"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-charcoal">{t.name}</p>
-                  <Badge tone="peach">{CHANNEL_LABEL[t.channel] ?? t.channel}</Badge>
+                  <p className="text-sm font-semibold text-charcoal group-hover:text-orange">
+                    {t.name}
+                  </p>
+                  <Badge tone="peach">
+                    {CHANNEL_LABEL[t.channel] ?? t.channel}
+                  </Badge>
                 </div>
-                <p className="mt-2 line-clamp-3 text-xs text-text-secondary">
+                <p className="mt-2 line-clamp-3 flex-1 whitespace-pre-wrap text-xs text-text-secondary">
                   {t.body}
                 </p>
-                <p className="mt-3 text-[11px] text-text-secondary">
-                  Used {t.usage_count} times, updated {formatDate(t.updated_at)}
-                </p>
+                <div className="mt-3 flex items-center justify-between">
+                  <p className="text-[11px] text-text-secondary">
+                    Used {t.usage_count}× · {formatDate(t.updated_at)}
+                  </p>
+                  <button
+                    type="button"
+                    title="Copy template"
+                    onClick={() => copyTemplate(t)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors",
+                      copiedTemplate === t.id
+                        ? "border-teal/40 bg-teal/10 text-teal"
+                        : "border-border text-charcoal hover:border-orange/40 hover:bg-peach/40 hover:text-orange",
+                    )}
+                  >
+                    {copiedTemplate === t.id ? (
+                      <>
+                        <CheckCircleIcon className="h-3.5 w-3.5" />
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <GlassIcon name="documents" size={14} />
+                        Copy
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -282,7 +418,7 @@ export default function CommunicationPage() {
                   placeholder="Search by name or subject..."
                   className="w-full bg-transparent outline-none"
                 />
-                <FunnelIcon className="h-4 w-4" />
+                <GlassIcon name="filters" size={16} />
               </div>
             </div>
 
@@ -298,21 +434,31 @@ export default function CommunicationPage() {
                 filteredConversations.map((c) => (
                   <li key={c.id}>
                     <button
+                      type="button"
                       onClick={() => setActiveId(c.id)}
-                      className={
+                      className={cn(
+                        "group flex w-full gap-3 border-l-2 px-4 py-3 text-left transition-colors duration-150",
                         c.id === activeId
-                          ? "flex w-full gap-3 border-l-2 border-orange bg-peach/30 px-4 py-3 text-left"
-                          : "flex w-full gap-3 border-l-2 border-transparent px-4 py-3 text-left hover:bg-cream/60"
-                      }
+                          ? "border-orange bg-peach/30"
+                          : "border-transparent hover:bg-peach/15",
+                      )}
                     >
                       <Avatar
                         initials={c.candidate_initials ?? "?"}
                         size="md"
                         online={c.is_online}
+                        className="transition-transform duration-150 group-hover:-translate-y-px"
                       />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between">
-                          <span className="truncate text-sm font-semibold text-charcoal">
+                          <span
+                            className={cn(
+                              "truncate text-sm font-semibold transition-colors",
+                              c.id === activeId
+                                ? "text-orange"
+                                : "text-charcoal group-hover:text-orange",
+                            )}
+                          >
                             {c.candidate_name ?? "Unknown"}
                           </span>
                           <span className="ml-2 flex items-center gap-1 whitespace-nowrap text-[11px] text-text-secondary">
@@ -379,7 +525,7 @@ export default function CommunicationPage() {
                   {active.candidate_slug && (
                     <Link
                       href={`/candidates/${active.candidate_slug}`}
-                      className="rounded-xl border border-border px-3 py-2 text-sm font-semibold text-charcoal hover:bg-cream"
+                      className="rounded-xl border border-border px-3 py-2 text-sm font-semibold text-charcoal transition-all duration-150 hover:-translate-y-px hover:border-orange/40 hover:bg-cream hover:text-orange active:translate-y-0"
                     >
                       View Candidate
                     </Link>
@@ -437,27 +583,93 @@ export default function CommunicationPage() {
                 </div>
 
                 <div className="border-t border-border p-4">
-                  <div className="mb-2 flex gap-4 text-sm">
-                    <span className="font-semibold text-orange">Message</span>
-                    <span className="font-semibold text-text-secondary">
-                      Note (Internal)
-                    </span>
+                  <div className="mb-2 flex gap-2 text-sm">
+                    {(["message", "note"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setComposerMode(m)}
+                        className={cn(
+                          "rounded-lg px-2.5 py-1 font-semibold transition-colors",
+                          composerMode === m
+                            ? "bg-peach/50 text-orange"
+                            : "text-text-secondary hover:text-charcoal",
+                        )}
+                      >
+                        {m === "message" ? "Message" : "Note (Internal)"}
+                      </button>
+                    ))}
                   </div>
-                  <div className="rounded-xl border border-border p-3">
+                  <div
+                    className={cn(
+                      "rounded-xl border p-3 transition-colors",
+                      composerMode === "note"
+                        ? "border-warning/40 bg-warning/5"
+                        : "border-border focus-within:border-orange/50",
+                    )}
+                  >
                     <input
-                      placeholder="Type your message..."
-                      className="w-full bg-transparent text-sm outline-none placeholder:text-text-secondary"
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") sendDraft();
+                      }}
+                      placeholder={
+                        composerMode === "note"
+                          ? "Add an internal note (not sent to the candidate)…"
+                          : "Type your message…"
+                      }
+                      className="w-full bg-transparent text-sm text-charcoal outline-none placeholder:text-text-secondary"
                     />
                     <div className="mt-3 flex items-center justify-between text-text-secondary">
-                      <div className="flex gap-3">
-                        <PaperClipIcon className="h-4 w-4" />
-                        <DocumentTextIcon className="h-4 w-4" />
-                        <FaceSmileIcon className="h-4 w-4" />
-                        <BookmarkIcon className="h-4 w-4" />
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          title="Attach a file"
+                          onClick={() =>
+                            toast("Attachments aren't supported in the prototype")
+                          }
+                          className="rounded-lg p-1.5 transition-colors hover:bg-peach/40 hover:text-orange"
+                        >
+                          <PaperClipIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Insert a template"
+                          onClick={() => setTab("Templates")}
+                          className="rounded-lg p-1.5 transition-colors hover:bg-peach/40 hover:text-orange"
+                        >
+                          <GlassIcon name="documents" size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          title="Emoji"
+                          onClick={() => setDraft((d) => `${d} 🙂`)}
+                          className="rounded-lg p-1.5 transition-colors hover:bg-peach/40 hover:text-orange"
+                        >
+                          <FaceSmileIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Save as quick reply"
+                          onClick={() => toast("Saved as a quick reply")}
+                          className="rounded-lg p-1.5 transition-colors hover:bg-peach/40 hover:text-orange"
+                        >
+                          <BookmarkIcon className="h-4 w-4" />
+                        </button>
                       </div>
-                      <button className="flex items-center gap-2 rounded-lg bg-orange px-4 py-2 text-sm font-semibold text-white">
-                        <PaperAirplaneIcon className="h-4 w-4" />
-                        Send
+                      <button
+                        type="button"
+                        onClick={sendDraft}
+                        disabled={!draft.trim() || sending}
+                        className="flex items-center gap-2 rounded-lg bg-orange px-4 py-2 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-px hover:bg-orange/90 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                      >
+                        {sending ? (
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-transparent" />
+                        ) : (
+                          <PaperAirplaneIcon className="h-4 w-4" />
+                        )}
+                        {composerMode === "note" ? "Add Note" : "Send"}
                       </button>
                     </div>
                   </div>
@@ -476,11 +688,19 @@ export default function CommunicationPage() {
                   const item = o as {
                     label: string;
                     value: string;
-                    icon: typeof EnvelopeIcon;
+                    glassIcon: GlassIconName;
                   };
                   return (
-                    <div key={item.label} className="rounded-xl bg-cream/70 p-3">
-                      <item.icon className="mx-auto h-4 w-4 text-orange" />
+                    <div
+                      key={item.label}
+                      title={item.label}
+                      className="group rounded-xl bg-cream/70 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:bg-peach/40 hover:shadow-[0_8px_18px_-10px_rgba(41,41,41,0.2)]"
+                    >
+                      <GlassIcon
+                        name={item.glassIcon}
+                        size={22}
+                        className="mx-auto transition-transform duration-200 group-hover:scale-110"
+                      />
                       <p className="mt-1 font-heading text-lg font-bold text-charcoal">
                         {item.value}
                       </p>
@@ -559,22 +779,37 @@ export default function CommunicationPage() {
                   { key: "whatsapp", label: "WhatsApp", value: candidate?.phone },
                   { key: "sms", label: "SMS", value: candidate?.phone },
                 ].map((ch) => {
-                  const on = candidate?.last_interaction_channel === ch.key;
+                  const on =
+                    preferredChannel === ch.key ||
+                    (preferredChannel === null &&
+                      candidate?.last_interaction_channel === ch.key);
                   return (
-                    <li key={ch.key} className="flex items-center gap-2">
-                      <span
-                        className={
-                          on
-                            ? "flex h-4 w-4 items-center justify-center rounded bg-orange text-white"
-                            : "h-4 w-4 rounded border border-border"
-                        }
+                    <li key={ch.key}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreferredChannel(ch.key);
+                          toast(`Preferred channel set to ${ch.label}`, "success");
+                        }}
+                        className="group flex w-full items-center gap-2 rounded-lg px-1 py-1 transition-colors hover:bg-peach/30"
                       >
-                        {on && <CheckCircleIcon className="h-3 w-3" />}
-                      </span>
-                      <span className="font-medium text-charcoal">{ch.label}</span>
-                      <span className="ml-auto truncate text-xs text-text-secondary">
-                        {ch.value ?? "-"}
-                      </span>
+                        <span
+                          className={cn(
+                            "flex h-4 w-4 items-center justify-center rounded transition-colors",
+                            on
+                              ? "bg-orange text-white"
+                              : "border border-border group-hover:border-orange/50",
+                          )}
+                        >
+                          {on && <CheckCircleIcon className="h-3 w-3" />}
+                        </span>
+                        <span className="font-medium text-charcoal">
+                          {ch.label}
+                        </span>
+                        <span className="ml-auto truncate text-xs text-text-secondary">
+                          {ch.value ?? "-"}
+                        </span>
+                      </button>
                     </li>
                   );
                 })}
@@ -587,15 +822,42 @@ export default function CommunicationPage() {
               </h3>
               <div className="mt-3 space-y-2">
                 {[
-                  { label: "Send Document Reminder", icon: DocumentTextIcon },
-                  { label: "Schedule Check-in", icon: CalendarDaysIcon },
-                  { label: "Share Pre-Joining Resources", icon: UserGroupIcon },
+                  {
+                    label: "Send Document Reminder",
+                    icon: "documents" as const,
+                    done: "Document reminder queued",
+                  },
+                  {
+                    label: "Schedule Check-in",
+                    icon: "leave" as const,
+                    done: "Check-in scheduled",
+                  },
+                  {
+                    label: "Share Pre-Joining Resources",
+                    icon: "employees" as const,
+                    done: "Pre-joining resources shared",
+                  },
                 ].map((a) => (
                   <button
                     key={a.label}
-                    className="flex w-full items-center gap-2 rounded-xl border border-border px-3 py-2.5 text-sm font-semibold text-charcoal hover:bg-cream"
+                    type="button"
+                    onClick={() =>
+                      toast(
+                        `${a.done}${
+                          active?.candidate_name
+                            ? ` for ${active.candidate_name}`
+                            : ""
+                        }`,
+                        "success",
+                      )
+                    }
+                    className="group flex w-full items-center gap-2 rounded-xl border border-border px-3 py-2.5 text-sm font-semibold text-charcoal transition-all duration-150 hover:-translate-y-px hover:border-orange/40 hover:bg-cream hover:text-orange active:translate-y-0"
                   >
-                    <a.icon className="h-4 w-4 text-orange" />
+                    <GlassIcon
+                      name={a.icon}
+                      size={16}
+                      className="transition-transform duration-200 group-hover:-translate-y-0.5"
+                    />
                     {a.label}
                   </button>
                 ))}

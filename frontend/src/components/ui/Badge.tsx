@@ -17,14 +17,17 @@ export function Badge({
   tone = "neutral",
   dot,
   className,
+  title,
 }: {
   children: React.ReactNode;
   tone?: Tone;
   dot?: boolean;
   className?: string;
+  title?: string;
 }) {
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
         toneClasses[tone],
@@ -43,9 +46,30 @@ const riskTone: Record<RiskLevel, Tone> = {
   Low: "teal",
 };
 
+const riskHint: Record<RiskLevel, string> = {
+  High: "High risk — reach out now to avoid drop-off",
+  Medium: "Medium risk — keep engagement steady",
+  Low: "Low risk — engagement looks healthy",
+};
+
+/**
+ * Risk indicator. High risk gets a restrained, slow "attention" pulse (soft
+ * breathing halo, never a flash) that intensifies slightly on hover. Other
+ * levels stay calm. Hovering any level shows a plain-language explanation.
+ */
 export function RiskBadge({ level }: { level: RiskLevel }) {
   return (
-    <Badge tone={riskTone[level]} dot>
+    <Badge
+      tone={riskTone[level]}
+      dot
+      title={riskHint[level]}
+      className={cn(
+        "cursor-help transition-shadow duration-200",
+        level === "High"
+          ? "risk-pulse hover:shadow-[0_0_0_5px_rgba(232,93,74,0.18)]"
+          : "hover:shadow-[0_0_0_4px_rgba(41,41,41,0.06)]",
+      )}
+    >
       {level}
     </Badge>
   );

@@ -1,21 +1,11 @@
-import {
-  ArrowTrendingUpIcon,
-  CalendarDaysIcon,
-  ChartBarIcon,
-  CheckCircleIcon,
-  DocumentTextIcon,
-  EnvelopeIcon,
-  ExclamationTriangleIcon,
-  FlagIcon,
-  FunnelIcon,
-  InformationCircleIcon,
-  UserIcon,
-  UsersIcon,
-} from "@heroicons/react/24/solid";
+import Link from "next/link";
+import { InformationCircleIcon } from "@heroicons/react/24/solid";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card, SectionCard } from "@/components/ui/Card";
+import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
 import { Avatar } from "@/components/ui/Avatar";
 import { TrendChart } from "@/components/charts/TrendChart";
+import { AnalyticsFilter } from "@/components/analytics/AnalyticsFilter";
 import { cn } from "@/lib/cn";
 import { ApiError } from "@/lib/api-client";
 import {
@@ -27,21 +17,21 @@ import {
 import { STAGE_LABEL, formatDate } from "@/lib/format";
 import { notFound } from "next/navigation";
 
-const STAGE_ICON = [
-  CheckCircleIcon,
-  EnvelopeIcon,
-  DocumentTextIcon,
-  UserIcon,
-  CalendarDaysIcon,
-  FlagIcon,
+const STAGE_GLASS: GlassIconName[] = [
+  "tasks",
+  "email",
+  "documents",
+  "employee",
+  "leave",
+  "jobs",
 ];
 
+// Brand orange throughout the card; only the intensity shifts with retention.
 function retainedColor(pct: number) {
-  if (pct >= 90) return "bg-teal";
-  if (pct >= 70) return "bg-teal/70";
-  if (pct >= 55) return "bg-orange/80";
-  if (pct >= 45) return "bg-orange";
-  return "bg-charcoal/40";
+  if (pct >= 75) return "bg-orange";
+  if (pct >= 50) return "bg-orange/80";
+  if (pct >= 30) return "bg-orange/60";
+  return "bg-orange/40";
 }
 
 export default async function AnalyticsPage() {
@@ -80,18 +70,25 @@ export default async function AnalyticsPage() {
   const avgRate =
     totalOffered > 0 ? Math.round((totalJoined / totalOffered) * 1000) / 10 : 0;
 
-  const kpis = [
+  const kpis: {
+    label: string;
+    value: string;
+    sub?: string;
+    glassIcon: GlassIconName;
+    href?: string;
+  }[] = [
     {
       label: "Total Offered Candidates",
       value: String(summary.total_offered),
       sub: `${summary.joined} joined, ${summary.declined} declined, ${summary.in_progress} in progress`,
-      icon: UsersIcon,
+      glassIcon: "employees",
+      href: "/candidates",
     },
     {
       label: "Offer-to-Join Conversion",
       value: `${summary.resolved_conversion_rate}%`,
       sub: `${summary.joined} of ${summary.joined + summary.declined} resolved candidates joined`,
-      icon: ArrowTrendingUpIcon,
+      glassIcon: "analytics",
     },
     {
       label: "High-Risk Candidates",
@@ -102,13 +99,14 @@ export default async function AnalyticsPage() {
               (summary.high_risk_candidates / summary.total_offered) * 100,
             )}% of all offered`
           : "",
-      icon: ExclamationTriangleIcon,
+      glassIcon: "security",
+      href: "/candidates?risk=high",
     },
     {
       label: "Average Engagement Frequency",
       value: String(summary.average_engagement_frequency),
       sub: "engagement events per candidate",
-      icon: ChartBarIcon,
+      glassIcon: "attendance",
     },
   ];
 
@@ -123,13 +121,15 @@ export default async function AnalyticsPage() {
         </p>
         <div className="flex gap-2">
           <span className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-medium text-charcoal">
-            <CalendarDaysIcon className="h-4 w-4 text-orange" />
+            <GlassIcon name="leave" size={18} />
             All offered candidates
           </span>
-          <button className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-charcoal hover:bg-cream">
-            <FunnelIcon className="h-4 w-4" />
-            Filter
-          </button>
+          <AnalyticsFilter
+            recruiters={recruiters.map((r) => ({
+              recruiter_id: r.recruiter_id,
+              recruiter_name: r.recruiter_name,
+            }))}
+          />
         </div>
       </div>
 
@@ -140,9 +140,7 @@ export default async function AnalyticsPage() {
 
         <Card className="flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-orange/12 text-orange">
-              <CalendarDaysIcon className="h-5 w-5" />
-            </span>
+            <GlassIcon name="leave" size={40} />
             <span className="text-sm font-medium text-text-secondary">
               Candidates Joining in
             </span>
@@ -182,12 +180,19 @@ export default async function AnalyticsPage() {
               </thead>
               <tbody>
                 {stageRows.map((s, i) => {
-                  const Icon = STAGE_ICON[i] ?? FlagIcon;
+                  const glass = STAGE_GLASS[i] ?? "jobs";
                   return (
-                    <tr key={s.stage} className="border-t border-border">
+                    <tr
+                      key={s.stage}
+                      className="group border-t border-border transition-colors hover:bg-peach/20"
+                    >
                       <td className="py-2.5">
-                        <span className="flex items-center gap-2 font-medium text-charcoal">
-                          <Icon className="h-4 w-4 text-teal" />
+                        <span className="flex items-center gap-2 font-medium text-charcoal transition-colors group-hover:text-orange">
+                          <GlassIcon
+                            name={glass}
+                            size={16}
+                            className="transition-transform duration-200 group-hover:-translate-y-0.5"
+                          />
                           {STAGE_LABEL[s.stage] ?? s.stage}
                         </span>
                       </td>
@@ -242,12 +247,24 @@ export default async function AnalyticsPage() {
               </thead>
               <tbody>
                 {recruiters.map((r) => (
-                  <tr key={r.recruiter_id} className="border-t border-border">
+                  <tr
+                    key={r.recruiter_id}
+                    className="group border-t border-border transition-colors hover:bg-peach/20"
+                  >
                     <td className="py-2.5">
-                      <span className="flex items-center gap-2 font-medium text-charcoal">
-                        <Avatar initials={r.initials} size="sm" tone="peach" />
+                      <Link
+                        href={`/candidates?recruiter=${r.recruiter_id}`}
+                        title={`View ${r.recruiter_name}'s candidates`}
+                        className="flex items-center gap-2 font-medium text-charcoal transition-colors group-hover:text-orange hover:underline"
+                      >
+                        <Avatar
+                          initials={r.initials}
+                          size="sm"
+                          tone="peach"
+                          className="transition-transform duration-200 group-hover:-translate-y-px"
+                        />
                         {r.recruiter_name}
-                      </span>
+                      </Link>
                     </td>
                     <td className="py-2.5 text-text-secondary">{r.offered}</td>
                     <td className="py-2.5 text-text-secondary">{r.joined}</td>
@@ -302,23 +319,36 @@ function Kpi({
   label,
   value,
   sub,
-  icon: Icon,
+  glassIcon,
+  href,
 }: {
   label: string;
   value: string;
   sub?: string;
-  icon: React.ComponentType<{ className?: string }>;
+  glassIcon: GlassIconName;
+  href?: string;
 }) {
-  return (
-    <Card className="flex flex-col gap-3">
+  const body = (
+    <Card className="flex h-full flex-col gap-3">
       <div className="flex items-center gap-3">
-        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-orange/12 text-orange">
-          <Icon className="h-5 w-5" />
-        </span>
+        <GlassIcon
+          name={glassIcon}
+          size={40}
+          className="transition-transform duration-200 group-hover:scale-105"
+        />
         <span className="text-sm font-medium text-text-secondary">{label}</span>
       </div>
-      <p className="font-heading text-3xl font-semibold text-charcoal">{value}</p>
+      <p className="font-heading text-3xl font-semibold text-charcoal transition-transform duration-200 group-hover:-translate-y-0.5">
+        {value}
+      </p>
       {sub && <p className="text-xs text-text-secondary">{sub}</p>}
     </Card>
+  );
+  return href ? (
+    <Link href={href} className="block">
+      {body}
+    </Link>
+  ) : (
+    body
   );
 }

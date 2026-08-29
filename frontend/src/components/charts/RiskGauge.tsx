@@ -1,14 +1,25 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { colors } from "@/lib/design-tokens";
+import { prefersReducedMotion } from "@/lib/motion";
 
 export function RiskGauge({ score }: { score: number }) {
   const clamped = Math.max(0, Math.min(100, score));
   const radius = 52;
   const circumference = Math.PI * radius;
-  const offset = circumference * (1 - clamped / 100);
+  const targetOffset = circumference * (1 - clamped / 100);
   const color =
     clamped >= 66 ? colors.coral : clamped >= 40 ? colors.warning : colors.teal;
+
+  // Animate the arc filling in from empty on mount.
+  const [offset, setOffset] = useState(() =>
+    prefersReducedMotion() ? targetOffset : circumference,
+  );
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setOffset(targetOffset));
+    return () => cancelAnimationFrame(id);
+  }, [targetOffset]);
 
   return (
     <div className="relative h-[74px] w-[132px]">
@@ -28,6 +39,9 @@ export function RiskGauge({ score }: { score: number }) {
           strokeLinecap="round"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
+          style={{
+            transition: "stroke-dashoffset 1.4s cubic-bezier(0.22, 1, 0.36, 1)",
+          }}
         />
       </svg>
     </div>

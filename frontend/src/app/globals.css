@@ -53,3 +53,108 @@ h5,
 h6 {
   font-family: var(--font-heading);
 }
+
+/* ------------------------------------------------------------------ *
+ * Interaction system — shared keyframes/utilities. Durations kept in
+ * the 150–300ms band for normal interactions; slower ones are opt-in.
+ * ------------------------------------------------------------------ */
+
+/* Dropdown / popover entrance (row action menu, user menu, search, etc). */
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Tab-panel / content swap. */
+@keyframes fadeSlide {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Risk badge: restrained "attention required" pulse — a soft halo that
+   breathes, never flashes. Respects reduced-motion. */
+@keyframes riskPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(232, 93, 74, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(232, 93, 74, 0.14);
+  }
+}
+
+/* Travelling white highlight that laps the Sign In button border on hover.
+   Uses an offset-path rounded rect so the spark follows the corners. Degrades
+   to "no spark" where offset-path rect() is unsupported. */
+@keyframes borderLap {
+  to {
+    offset-distance: 100%;
+  }
+}
+
+.btn-border-spark {
+  position: relative;
+  overflow: hidden;
+}
+.btn-border-spark::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.9),
+    transparent
+  );
+  offset-path: rect(0 100% 100% 0 round 16px);
+  offset-rotate: auto;
+  offset-distance: 0%;
+  opacity: 0;
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+.btn-border-spark:hover::after {
+  opacity: 0.9;
+  animation: borderLap 1.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-border-spark:hover::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.animate-menu-in {
+  animation: menuIn 140ms ease-out;
+}
+.animate-fade-slide {
+  animation: fadeSlide 220ms ease-out;
+}
+.risk-pulse {
+  animation: riskPulse 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .risk-pulse,
+  .animate-menu-in,
+  .animate-fade-slide {
+    animation: none !important;
+  }
+}

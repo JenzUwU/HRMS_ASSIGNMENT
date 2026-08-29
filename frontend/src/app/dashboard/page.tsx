@@ -1,22 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import {
-  CalendarDaysIcon,
-  ChartBarIcon,
-  ChatBubbleLeftRightIcon,
-  CheckCircleIcon,
-  EllipsisVerticalIcon,
-  EnvelopeIcon,
-  ExclamationTriangleIcon,
-  MegaphoneIcon,
-  Squares2X2Icon,
-  UsersIcon,
-} from "@heroicons/react/24/solid";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card, SectionCard } from "@/components/ui/Card";
 import { StatCard } from "@/components/ui/StatCard";
+import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
 import { Avatar } from "@/components/ui/Avatar";
-import { RiskBadge } from "@/components/ui/Badge";
+import { AttentionTable } from "@/components/dashboard/AttentionTable";
 import { EngagementFunnel } from "@/components/charts/EngagementFunnel";
 import { ApiError } from "@/lib/api-client";
 import {
@@ -25,13 +14,13 @@ import {
   getConversations,
   getStageFunnel,
 } from "@/lib/api";
-import { STAGE_LABEL, formatDate, relativeDays, relativeTime, riskLabel } from "@/lib/format";
+import { STAGE_LABEL, formatDate, relativeTime } from "@/lib/format";
 
-const quickAccess = [
-  { label: "Candidates", href: "/candidates", icon: UsersIcon },
-  { label: "Engagement Journey", href: "/engagement-journey", icon: Squares2X2Icon },
-  { label: "Communication", href: "/communication", icon: MegaphoneIcon },
-  { label: "Analytics", href: "/analytics", icon: ChartBarIcon },
+const quickAccess: { label: string; href: string; icon: GlassIconName }[] = [
+  { label: "Candidates", href: "/candidates", icon: "employees" },
+  { label: "Engagement Journey", href: "/engagement-journey", icon: "tasks" },
+  { label: "Communication", href: "/communication", icon: "messages" },
+  { label: "Analytics", href: "/analytics", icon: "analytics" },
 ];
 
 export default async function DashboardPage() {
@@ -63,15 +52,13 @@ export default async function DashboardPage() {
       label: "Total Offered Candidates",
       value: String(summary.total_offered),
       sub: `${summary.joined} joined so far`,
-      icon: UsersIcon,
-      iconTone: "orange" as const,
+      glassIcon: "employees" as const,
     },
     {
       label: "Joining in Next 7 Days",
       value: String(summary.joining_next_7_days),
       sub: `${summary.joining_next_15_days} within 15 days`,
-      icon: CalendarDaysIcon,
-      iconTone: "peach" as const,
+      glassIcon: "leave" as const,
     },
     {
       label: "High-Risk Candidates",
@@ -82,15 +69,13 @@ export default async function DashboardPage() {
               (summary.high_risk_candidates / summary.total_offered) * 100,
             )}% of total offered`
           : "",
-      icon: ExclamationTriangleIcon,
-      iconTone: "coral" as const,
+      glassIcon: "security" as const,
     },
     {
       label: "Pending Engagements",
       value: String(summary.in_progress),
       sub: "candidates still in the journey",
-      icon: CheckCircleIcon,
-      iconTone: "teal" as const,
+      glassIcon: "tasks" as const,
     },
   ];
 
@@ -113,7 +98,7 @@ export default async function DashboardPage() {
           </p>
         </div>
         <span className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-medium text-charcoal">
-          <CalendarDaysIcon className="h-4 w-4 text-orange" />
+          <GlassIcon name="leave" size={18} />
           {dateLabel}
         </span>
       </div>
@@ -149,25 +134,32 @@ export default async function DashboardPage() {
               No pending actions.
             </p>
           ) : (
-            <ul className="space-y-4">
+            <ul className="space-y-2">
               {active.items.map((c) => (
-                <li key={c.id} className="flex items-center gap-3">
-                  <Avatar initials={c.initials} size="sm" tone="peach" />
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      href={`/candidates/${c.slug}`}
-                      className="truncate text-sm font-semibold text-charcoal hover:text-orange"
-                    >
-                      {c.full_name}
-                    </Link>
-                    <p className="truncate text-xs text-text-secondary">
-                      {c.next_action ?? "Follow up"}
-                    </p>
-                  </div>
-                  <span className="flex items-center gap-1 whitespace-nowrap text-xs font-medium text-text-secondary">
-                    <CalendarDaysIcon className="h-3.5 w-3.5" />
-                    {formatDate(c.joining_date)}
-                  </span>
+                <li key={c.id}>
+                  <Link
+                    href={`/candidates/${c.slug}`}
+                    className="group/row -mx-2 flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 ring-1 ring-transparent transition duration-200 hover:-translate-y-px hover:bg-orange/[0.04] hover:shadow-[0_8px_20px_-10px_rgba(252,128,25,0.25)] hover:ring-orange/20"
+                  >
+                    <Avatar
+                      initials={c.initials}
+                      size="sm"
+                      tone="peach"
+                      className="transition duration-200 group-hover/row:-translate-y-px group-hover/row:brightness-105"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-charcoal transition-colors group-hover/row:text-orange">
+                        {c.full_name}
+                      </p>
+                      <p className="truncate text-xs text-text-secondary">
+                        {c.next_action ?? "Follow up"}
+                      </p>
+                    </div>
+                    <span className="flex items-center gap-1 whitespace-nowrap text-xs font-medium text-text-secondary">
+                      <GlassIcon name="leave" size={14} />
+                      {formatDate(c.joining_date)}
+                    </span>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -185,27 +177,30 @@ export default async function DashboardPage() {
               No recent messages.
             </p>
           ) : (
-            <ul className="space-y-4">
+            <ul className="space-y-2">
               {conversations.items.map((c) => (
-                <li key={c.id} className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-peach text-orange">
-                    {c.channel === "email" ? (
-                      <EnvelopeIcon className="h-4 w-4" />
-                    ) : (
-                      <ChatBubbleLeftRightIcon className="h-4 w-4" />
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-charcoal">
-                      {c.subject}
-                    </p>
-                    <p className="truncate text-xs text-text-secondary">
-                      {c.candidate_name ?? "Unknown"}
-                    </p>
-                  </div>
-                  <span className="whitespace-nowrap text-xs text-text-secondary">
-                    {relativeTime(c.last_message_at)}
-                  </span>
+                <li key={c.id}>
+                  <Link
+                    href={`/communication?c=${c.id}`}
+                    className="group/row -mx-2 flex cursor-pointer items-center gap-3 rounded-xl px-2 py-1.5 ring-1 ring-transparent transition duration-200 hover:-translate-y-px hover:bg-orange/[0.04] hover:shadow-[0_8px_20px_-10px_rgba(252,128,25,0.25)] hover:ring-orange/20"
+                  >
+                    <GlassIcon
+                      name={c.channel === "email" ? "email" : "messages"}
+                      size={34}
+                      className="transition duration-200 group-hover/row:-translate-y-px group-hover/row:brightness-105"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-charcoal transition-colors group-hover/row:text-orange">
+                        {c.subject}
+                      </p>
+                      <p className="truncate text-xs text-text-secondary">
+                        {c.candidate_name ?? "Unknown"}
+                      </p>
+                    </div>
+                    <span className="whitespace-nowrap text-xs text-text-secondary">
+                      {relativeTime(c.last_message_at)}
+                    </span>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -219,56 +214,7 @@ export default async function DashboardPage() {
           className="lg:col-span-2"
           footer={{ label: "View All at Risk Candidates", href: "/candidates" }}
         >
-          {highRisk.items.length === 0 ? (
-            <p className="py-6 text-center text-sm text-text-secondary">
-              No high-risk candidates right now.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                    <th className="pb-3">Candidate</th>
-                    <th className="pb-3">Joining Date</th>
-                    <th className="pb-3">Last Interaction</th>
-                    <th className="pb-3">Risk Level</th>
-                    <th className="pb-3">Recommended Next Action</th>
-                    <th className="pb-3" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {highRisk.items.map((c) => (
-                    <tr key={c.id} className="border-t border-border">
-                      <td className="py-3">
-                        <Link
-                          href={`/candidates/${c.slug}`}
-                          className="flex items-center gap-2 font-semibold text-charcoal hover:text-orange"
-                        >
-                          <Avatar initials={c.initials} size="sm" tone="peach" />
-                          {c.full_name}
-                        </Link>
-                      </td>
-                      <td className="py-3 text-text-secondary">
-                        {formatDate(c.joining_date)}
-                      </td>
-                      <td className="py-3 text-text-secondary">
-                        {relativeDays(c.days_since_interaction)}
-                      </td>
-                      <td className="py-3">
-                        <RiskBadge level={riskLabel(c.risk_level)} />
-                      </td>
-                      <td className="py-3 text-text-secondary">
-                        {c.next_action ?? ""}
-                      </td>
-                      <td className="py-3 text-right">
-                        <EllipsisVerticalIcon className="h-4 w-4 text-text-secondary" />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <AttentionTable items={highRisk.items} />
         </SectionCard>
 
         <Card>
@@ -282,9 +228,7 @@ export default async function DashboardPage() {
                 href={q.href}
                 className="flex flex-col items-center gap-2 rounded-xl border border-border bg-cream/60 px-3 py-5 text-center hover:border-orange/40 hover:bg-peach/40"
               >
-                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-orange/12 text-orange">
-                  <q.icon className="h-5 w-5" />
-                </span>
+                <GlassIcon name={q.icon} size={40} />
                 <span className="text-xs font-semibold text-charcoal">
                   {q.label}
                 </span>

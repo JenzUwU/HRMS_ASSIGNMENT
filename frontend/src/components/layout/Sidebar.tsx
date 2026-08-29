@@ -2,23 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  ChartBarIcon,
-  ChevronLeftIcon,
-  HomeIcon,
-  MegaphoneIcon,
-  Squares2X2Icon,
-  UsersIcon,
-} from "@heroicons/react/24/solid";
+import { ChevronLeftIcon } from "@heroicons/react/24/solid";
 import { Logo } from "@/components/layout/Logo";
+import { GlassIcon, type GlassIconName } from "@/components/ui/GlassIcon";
 import { cn } from "@/lib/cn";
 
-const nav = [
-  { label: "Dashboard", href: "/dashboard", icon: HomeIcon },
-  { label: "Candidates", href: "/candidates", icon: UsersIcon },
-  { label: "Engagement Journey", href: "/engagement-journey", icon: Squares2X2Icon },
-  { label: "Communication", href: "/communication", icon: MegaphoneIcon },
-  { label: "Analytics", href: "/analytics", icon: ChartBarIcon },
+const nav: { label: string; href: string; icon: GlassIconName }[] = [
+  { label: "Dashboard", href: "/dashboard", icon: "organization" },
+  { label: "Candidates", href: "/candidates", icon: "employees" },
+  { label: "Engagement Journey", href: "/engagement-journey", icon: "tasks" },
+  { label: "Communication", href: "/communication", icon: "messages" },
+  { label: "Analytics", href: "/analytics", icon: "analytics" },
 ];
 
 export function Sidebar() {
@@ -26,7 +20,7 @@ export function Sidebar() {
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-surface lg:flex">
-      <div className="flex items-center gap-3 px-6 py-6">
+      <div className="flex h-16 items-center gap-3 border-b border-border px-6">
         <Logo size={44} />
         <div className="leading-tight">
           <p className="text-xs font-medium text-text-secondary">
@@ -51,7 +45,7 @@ export function Sidebar() {
                   : "text-text-secondary hover:bg-cream hover:text-charcoal",
               )}
             >
-              <item.icon className="h-5 w-5" />
+              <GlassIcon name={item.icon} size={20} />
               {item.label}
             </Link>
           );
